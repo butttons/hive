@@ -24,11 +24,11 @@ Two files per app project, same directory:
 
 ```json
 {
-  "hive": { "port": 8101, "domain": "app.example.com", "server": "user@box", "backend": "docker" }
+  "hive": { "port": 8101, "domain": "app.example.com", "server": "user@box", "dir": "/opt/apps/app", "backend": "docker" }
 }
 ```
 
-`port` is required; `domain`, `server`, `backend` optional. Loaded by `registry.go`.
+`port` is required; `domain`, `server`, `dir`, `backend` optional. Loaded by `registry.go`.
 
 ## Monorepo model (settled)
 
@@ -52,7 +52,8 @@ Two files per app project, same directory:
 
 All implemented and verified live. User-facing reference: README.md / hive.butttons.dev.
 
-- `add` `deploy` `up` `down` `status` `init` `cf` `ui`.
+- `add` `deploy` `up` `down` `status` `init` `bootstrap` `cf` `exe` `ui`.
+- `bootstrap` = install/upgrade hive + celld at `~/.local/bin` on `hive.server` over ssh. The bare-box error path in `deploy`/`up` points at it.
 - `deploy` = typecheck (`tsc -b`) → `celld deploy` → restart node → 30s `/__celld/health` gate. **The restart is the reload** — no watch mode or HMR.
 - Backends behind one interface; `down` is SIGTERM either way (celld drains gracefully). Idempotent; config drift → restart.
   - **process** (default): `celld` detached, log `.hive/node.log`. No supervisor — a reboot leaves the node down.
@@ -65,6 +66,7 @@ All implemented and verified live. User-facing reference: README.md / hive.buttt
 - **Cloudflare is optional convenience**: `cf login` (OAuth), `init` (R2 provisioning), `cf tunnel` (ingress). Without Cloudflare, users set the env vars and terminate TLS however they want — hive prescribes no ingress.
 - **Env vars win.** `CLOUDFLARE_API_TOKEN` beats `~/.config/hive/auth.json`; per-app `~/.config/hive/<app>.env` (0600) feeds celld. All credential files are 0600 and never committed.
 - `init` cred chain: `--access-key/--secret-key/--endpoint` flags (zero CF calls) → reuse from a sibling app's env file (matching `CELLD_BUCKET`) → CF mint → deep-link paste fallback.
+- **exe.dev is optional convenience** under `hive exe` (`new`/`share`/`domain`), driven over its SSH CLI (`ssh exe.dev <cmd>`). exe.dev VMs ship a public hostname + TLS + HTTPS front door, so the CF tunnel is unnecessary there. `exe domain` upserts the CNAME via cf creds with `proxied: false` (exe.dev terminates TLS; orange-cloud breaks it), then `domain add`. Gotcha: `domain add` can fail on stdout with exit 0 and their resolver lags ours — always verify via `domain ls` and retry.
 
 ## Cloudflare specifics
 

@@ -89,8 +89,12 @@ Every command takes `--json` and prints machine-readable output. Agents are the 
 | `hive down` | `--local` | Stop the node gracefully (SIGTERM; celld drains in-flight work) |
 | `hive status` | `--local`, `--filter` | App config + node state; from a workspace root, show a compact fleet table |
 | `hive init` | `--bucket`, `--access-key`, `--secret-key`, `--endpoint`, `--region`, `--jurisdiction`, `--force` | Provision bucket credentials into `~/.config/hive/<app>.env` (0600) |
+| `hive bootstrap` | — | Install hive + celld at `~/.local/bin` on the app's server (idempotent) |
 | `hive cf login` | `--status`, `--export`, `--no-browser` | Cloudflare OAuth consent (PKCE); stores a refreshable token |
 | `hive cf tunnel` | `--name`, `--ssh` | Create/sync a remotely-managed Cloudflare Tunnel: ingress rules + DNS, prints the box install command |
+| `hive exe new <name>` | — | Create an exe.dev VM and wait for its DNS to propagate |
+| `hive exe share` | `--private` | Point the exe.dev HTTPS proxy at the app's port; public by default |
+| `hive exe domain` | — | CNAME the app's domain to the VM (DNS-only, via Cloudflare creds) and register it with exe.dev |
 
 ### `hive init` credential chain
 
@@ -118,7 +122,23 @@ Set `"server": "user@box"` in the hive block and commands proxy to the hive bina
 
 When the server's app directory differs from the local one, set `"dir": "/absolute/path/on/server"` in the hive block. It must be absolute (no `~`). On `deploy`/`up`, hive creates the directory and syncs `package.json` + `wrangler.jsonc` there before running the remote command. `down` and `status` also use `dir` when set.
 
-Box setup: the hive binary at `~/.local/bin/hive`, celld alongside it, docker if wanted. Credentials sync over SSH as `~/.config/hive/<app>.env` (0600). Rebuild + scp the box's hive binary after hive upgrades or it runs stale code.
+Box setup: `hive bootstrap` installs hive + celld at `~/.local/bin` on the server (re-run to upgrade). Add docker yourself if wanted. Credentials sync over SSH as `~/.config/hive/<app>.env` (0600).
+
+## exe.dev
+
+`hive exe` drives the exe.dev control plane over its SSH CLI. exe.dev VMs ship with a public hostname, TLS, and an HTTPS front door, so the Cloudflare Tunnel is unnecessary there — the front door is the ingress. Full flow for a fresh VM:
+
+```sh
+# hive block: { "port": 8101, "server": "mybot.exe.xyz",
+#               "dir": "/home/exedev/apps/mybot", "domain": "mybot.example.com" }
+hive exe new mybot        # create the VM, wait for DNS
+hive bootstrap            # install hive + celld on it
+hive deploy               # ship, restart, health-gate over ssh
+hive exe share            # https://mybot.exe.xyz -> :8101, public (or --private)
+hive exe domain           # mybot.example.com live: DNS-only CNAME + exe.dev registration
+```
+
+`exe domain` uses your Cloudflare credentials to create the CNAME and hard-requires `proxied: false` — exe.dev terminates TLS itself and orange-cloud records break it. Without cf credentials it prints the exact record to create and exits; re-run after creating it. Registration is verified via exe.dev's `domain ls` and retried, since their resolver lags yours.
 
 CI: a stock GitHub-hosted runner runs `hive deploy`; it reaches the box via SSH through the Cloudflare Tunnel (`hive cf tunnel --ssh` adds the `ssh.<domain>` ingress rule; `sshd` bound to loopback, cloudflared as SSH ProxyCommand). Secrets: bucket creds, SSH key, tunnel token.
 

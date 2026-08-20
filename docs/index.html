@@ -4,19 +4,20 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>hive · docs</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' fill='%230a0b0d'/%3E%3Crect x='3' y='3' width='10' height='10' fill='%234ade80'/%3E%3C/svg%3E">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2338bdf8' stroke-width='2'%3E%3Cpath d='M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z'/%3E%3C/svg%3E">
 <style>
 :root {
-  --bg: #0a0b0d;
-  --bg-panel: #0d0f12;
-  --bg-term: #050607;
-  --fg: #e6e6e6;
-  --fg-muted: #5c6670;
-  --fg-dim: #3a424a;
-  --border: #1e242a;
-  --green: #4ade80;
-  --red: #f87171;
-  --amber: #fbbf24;
+  --bg: #09090b;
+  --bg-panel: #18181b;
+  --bg-term: #0c0c0f;
+  --fg: #e4e4e7;
+  --fg-muted: #71717a;
+  --fg-dim: #52525b;
+  --border: #27272a;
+  --accent: #38bdf8;
+  --up: #34d399;
+  --down: #fb7185;
+  --warn: #fbbf24;
 }
 * { box-sizing: border-box; }
 html { scroll-behavior: smooth; scroll-padding-top: 72px; }
@@ -34,6 +35,16 @@ body {
   flex-direction: column;
   min-height: 100vh;
 }
+.icon {
+  width: 13px;
+  height: 13px;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  vertical-align: -1.5px;
+}
 header {
   position: sticky;
   top: 0;
@@ -44,7 +55,7 @@ header {
   gap: 18px;
   padding: 14px 22px;
   border-bottom: 1px solid var(--border);
-  background: rgba(10, 11, 13, 0.96);
+  background: rgba(9, 9, 11, 0.96);
   backdrop-filter: blur(6px);
 }
 .brand {
@@ -55,14 +66,18 @@ header {
   letter-spacing: -0.02em;
 }
 .brand .mark {
-  color: var(--green);
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--fg);
   text-decoration: none;
 }
+.brand .mark .icon { width: 16px; height: 16px; color: var(--accent); vertical-align: 0; }
 .cursor {
   display: inline-block;
   width: 8px;
   height: 16px;
-  background: var(--green);
+  background: var(--accent);
   margin-left: 2px;
   animation: blink 1s step-end infinite;
 }
@@ -79,7 +94,7 @@ nav a {
   text-decoration: none;
   transition: color 0.12s;
 }
-nav a:hover { color: var(--green); }
+nav a:hover { color: var(--accent); }
 main {
   flex: 1;
   width: 100%;
@@ -107,13 +122,14 @@ p.lead {
 h2 {
   margin: 0 0 16px;
   padding-left: 10px;
-  border-left: 2px solid var(--green);
+  border-left: 2px solid var(--accent);
   font-size: 11px;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.14em;
   color: var(--fg);
 }
+h2 .icon { color: var(--fg-muted); margin-right: 7px; }
 h3 {
   margin: 28px 0 12px;
   font-size: 13px;
@@ -126,7 +142,7 @@ p, ul, ol {
 }
 ul, ol { padding-left: 22px; }
 li { margin-bottom: 6px; }
-a { color: var(--green); }
+a { color: var(--accent); }
 a:hover { text-decoration: underline; }
 code {
   font-family: inherit;
@@ -152,6 +168,7 @@ pre code {
   font-size: 12px;
   line-height: 1.55;
 }
+pre .c { color: var(--fg-muted); }
 .table-wrap {
   border: 1px solid var(--border);
   overflow-x: auto;
@@ -180,13 +197,13 @@ tr:last-child td { border-bottom: none; }
 td code { white-space: nowrap; }
 .callout {
   border: 1px solid var(--border);
-  border-left: 2px solid var(--amber);
+  border-left: 2px solid var(--warn);
   padding: 12px 14px;
   background: var(--bg-panel);
   margin: 0 0 18px;
 }
 .callout.warn {
-  border-left-color: var(--red);
+  border-left-color: var(--down);
 }
 .callout p:last-child { margin-bottom: 0; }
 .callout-title {
@@ -196,6 +213,7 @@ td code { white-space: nowrap; }
   color: var(--fg-muted);
   margin-bottom: 6px;
 }
+.callout-title .icon { margin-right: 6px; }
 footer {
   border-top: 1px solid var(--border);
   padding: 18px 22px;
@@ -212,13 +230,14 @@ footer {
 </head>
 <body>
 <header>
-  <a class="brand" href="#"><span class="mark">hive</span><span class="cursor"></span></a>
+  <a class="brand" href="#"><span class="mark"><svg class="icon" viewBox="0 0 24 24"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>hive</span><span class="cursor"></span></a>
   <nav>
     <a href="#quickstart">Quickstart</a>
     <a href="#config">Config</a>
     <a href="#commands">Commands</a>
     <a href="#backends">Backends</a>
     <a href="#remote">Remote</a>
+    <a href="#exe">exe.dev</a>
     <a href="#env">Env</a>
     <a href="https://github.com/butttons/hive" target="_blank" rel="noopener">GitHub</a>
   </nav>
@@ -231,17 +250,17 @@ footer {
   </section>
 
   <section id="requirements">
-    <h2>What you need</h2>
+    <h2><svg class="icon" viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>What you need</h2>
     <ul>
       <li>An S3-compatible bucket with conditional writes + read-after-write consistency (Cloudflare R2, AWS S3, Tigris qualify; B2/MinIO/Spaces do not), and its credentials.</li>
       <li>A box to run nodes on: Linux (amd64/arm64) or macOS (arm64). Docker on the box if you want the supervised backend.</li>
       <li><a href="https://celld.dev/docs">celld</a> installed wherever you deploy <em>from</em> (<code>curl -fsSL https://celld.dev/install.sh | sh</code>), plus <code>esbuild</code> on PATH for deploys.</li>
     </ul>
-    <p>Cloudflare is optional: <code>cf login</code>/<code>init</code>/<code>cf tunnel</code> automate R2 + Tunnel + DNS, but any S3 credentials and any reverse proxy (caddy, nginx, your own tunnel) work just as well.</p>
+    <p>Cloudflare is optional: <code>cf login</code>/<code>init</code>/<code>cf tunnel</code> automate R2 + Tunnel + DNS, but any S3 credentials and any reverse proxy (caddy, nginx, your own tunnel) work just as well. On exe.dev, <code>hive exe</code> handles VMs, proxy, and domains instead.</p>
   </section>
 
   <section id="build">
-    <h2>Install</h2>
+    <h2><svg class="icon" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>Install</h2>
     <pre><code>curl -fsSL https://hive.butttons.dev/setup.sh | bash</code></pre>
     <p>Installs the latest release binary to <code>~/.local/bin/hive</code> (checksum-verified). Override the destination with <code>HIVE_INSTALL_DIR</code>.</p>
     <p>Or build from source:</p>
@@ -250,21 +269,21 @@ footer {
   </section>
 
   <section id="quickstart">
-    <h2>Quickstart</h2>
-    <pre><code>hive add myapp            # scaffold app, allocates a free port
+    <h2><svg class="icon" viewBox="0 0 24 24"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>Quickstart</h2>
+    <pre><code>hive add myapp            <span class="c"># scaffold app, allocates a free port</span>
 cd myapp
 
-# credentials: either export AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY /
-# S3_ENDPOINT / AWS_REGION / CELLD_BUCKET yourself, or provision with:
+<span class="c"># credentials: either export AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY /
+# S3_ENDPOINT / AWS_REGION / CELLD_BUCKET yourself, or provision with:</span>
 hive init --bucket mybucket --access-key ... --secret-key ... --endpoint ...
 
-hive deploy               # tsc → celld deploy → restart node → health gate
+hive deploy               <span class="c"># tsc → celld deploy → restart node → health gate</span>
 curl http://127.0.0.1:&lt;port&gt;/</code></pre>
     <p>There is no watch mode or HMR — the restart is the reload. The loop is <code>edit → hive deploy → curl</code>.</p>
   </section>
 
   <section id="config">
-    <h2>Config model</h2>
+    <h2><svg class="icon" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>Config model</h2>
     <p>Two files per app, same directory:</p>
     <ul>
       <li><code>wrangler.jsonc</code> — pristine, celld-legal keys only (<code>name</code>, <code>main</code>, <code>compatibility_date</code>, <code>durable_objects</code>, <code>migrations</code>, <code>vars</code>, <code>assets</code>, <code>services</code>, …). This is the deploy contract handed to celld untouched. celld hard-fails on anything else.</li>
@@ -277,7 +296,7 @@ curl http://127.0.0.1:&lt;port&gt;/</code></pre>
   </section>
 
   <section id="monorepos">
-    <h2>Monorepos</h2>
+    <h2><svg class="icon" viewBox="0 0 24 24"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg>Monorepos</h2>
     <p>Run <code>hive</code> from a workspace root to operate on the whole fleet. Discovery order:</p>
     <ol>
       <li><code>pnpm-workspace.yml</code> / <code>pnpm-workspace.yaml</code> <code>packages:</code> globs.</li>
@@ -288,7 +307,7 @@ curl http://127.0.0.1:&lt;port&gt;/</code></pre>
   </section>
 
   <section id="commands">
-    <h2>Commands</h2>
+    <h2><svg class="icon" viewBox="0 0 24 24"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>Commands</h2>
     <p>Every command takes <code>--json</code> and prints machine-readable output. Agents are the primary user.</p>
     <div class="table-wrap">
       <table>
@@ -301,8 +320,12 @@ curl http://127.0.0.1:&lt;port&gt;/</code></pre>
           <tr><td><code>hive down</code></td><td><code>--local</code></td><td>Stop the node gracefully (SIGTERM; celld drains in-flight work)</td></tr>
           <tr><td><code>hive status</code></td><td><code>--local</code>, <code>--filter</code></td><td>App config + node state; from a workspace root, show a compact fleet table</td></tr>
           <tr><td><code>hive init</code></td><td><code>--bucket</code>, <code>--access-key</code>, <code>--secret-key</code>, <code>--endpoint</code>, <code>--region</code>, <code>--jurisdiction</code>, <code>--force</code></td><td>Provision bucket credentials into <code>~/.config/hive/&lt;app&gt;.env</code> (0600)</td></tr>
+          <tr><td><code>hive bootstrap</code></td><td>—</td><td>Install hive + celld at <code>~/.local/bin</code> on the app's server (idempotent; re-run to upgrade)</td></tr>
           <tr><td><code>hive cf login</code></td><td><code>--status</code>, <code>--export</code>, <code>--no-browser</code></td><td>Cloudflare OAuth consent (PKCE); stores a refreshable token</td></tr>
           <tr><td><code>hive cf tunnel</code></td><td><code>--name</code>, <code>--ssh</code></td><td>Create/sync a remotely-managed Cloudflare Tunnel: ingress rules + DNS, prints the box install command</td></tr>
+          <tr><td><code>hive exe new &lt;name&gt;</code></td><td>—</td><td>Create an exe.dev VM and wait for its DNS to propagate</td></tr>
+          <tr><td><code>hive exe share</code></td><td><code>--private</code></td><td>Point the exe.dev HTTPS proxy at the app's port; public by default</td></tr>
+          <tr><td><code>hive exe domain</code></td><td>—</td><td>CNAME the app's domain to the VM (DNS-only, via Cloudflare creds) and register it with exe.dev</td></tr>
         </tbody>
       </table>
     </div>
@@ -321,27 +344,41 @@ curl http://127.0.0.1:&lt;port&gt;/</code></pre>
   </section>
 
   <section id="backends">
-    <h2>Run backends</h2>
+    <h2><svg class="icon" viewBox="0 0 24 24"><path d="M16.5 9.4 7.55 4.24"/><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.29 7 12 12 20.71 7"/><line x1="12" y1="22" x2="12" y2="12"/></svg>Run backends</h2>
     <ul>
       <li><strong>process</strong> (default): <code>celld</code> as a detached process, logs to <code>.hive/node.log</code>, <code>down</code> = SIGTERM (celld drains gracefully). Zero moving parts; no supervisor — a reboot leaves the node down until the next <code>hive up</code>.</li>
       <li><strong>docker</strong> (<code>--docker</code> or <code>"backend": "docker"</code>): node runs as container <code>hive-&lt;app&gt;</code> from image <code>hive/celld:&lt;version&gt;</code> (built on demand from the official celld release binary), published on <code>127.0.0.1:&lt;port&gt;</code>, <code>--restart unless-stopped</code>, config drift detected by a label hash → recreate. <code>docker stop</code> is the same graceful drain.</li>
     </ul>
     <div class="callout warn">
-      <div class="callout-title">Caution</div>
+      <div class="callout-title"><svg class="icon" viewBox="0 0 24 24"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>Caution</div>
       <p>One node per fleet bucket prefix, ever. Two nodes on the same <code>s3://bucket/&lt;app&gt;</code> prefix produce <code>DurableObjectRoutingError: owner unreachable</code>.</p>
     </div>
   </section>
 
   <section id="remote">
-    <h2>Remote operation</h2>
+    <h2><svg class="icon" viewBox="0 0 24 24"><rect x="2" y="2" width="20" height="8" rx="2" ry="2"/><rect x="2" y="14" width="20" height="8" rx="2" ry="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg>Remote operation</h2>
     <p>Set <code>"server": "user@box"</code> in the hive block and commands proxy to the hive binary on the box over SSH (<code>ssh box hive &lt;cmd&gt; --local</code>). No RPC protocol; the same backends run there. <code>celld deploy</code> itself is bucket-direct from anywhere — only restart and health checks touch the box. <code>--local</code> forces local operation even when <code>server</code> is set.</p>
     <p>When the server's app directory differs from the local one, set <code>"dir": "/absolute/path/on/server"</code> in the hive block. It must be absolute (no <code>~</code>). On <code>deploy</code>/<code>up</code>, hive creates the directory and syncs <code>package.json</code> + <code>wrangler.jsonc</code> there before running the remote command. <code>down</code> and <code>status</code> also use <code>dir</code> when set.</p>
-    <p>Box setup: the hive binary at <code>~/.local/bin/hive</code>, celld alongside it, docker if wanted. Credentials sync over SSH as <code>~/.config/hive/&lt;app&gt;.env</code> (0600). Rebuild + scp the box's hive binary after hive upgrades or it runs stale code.</p>
+    <p>Box setup: <code>hive bootstrap</code> installs hive + celld at <code>~/.local/bin</code> on the server (re-run to upgrade). Add docker yourself if wanted. Credentials sync over SSH as <code>~/.config/hive/&lt;app&gt;.env</code> (0600).</p>
     <p>CI: a stock GitHub-hosted runner runs <code>hive deploy</code>; it reaches the box via SSH through the Cloudflare Tunnel (<code>hive cf tunnel --ssh</code> adds the <code>ssh.&lt;domain&gt;</code> ingress rule; <code>sshd</code> bound to loopback, cloudflared as SSH ProxyCommand). Secrets: bucket creds, SSH key, tunnel token.</p>
   </section>
 
+  <section id="exe">
+    <h2><svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>exe.dev</h2>
+    <p><code>hive exe</code> drives the <a href="https://exe.dev">exe.dev</a> control plane over its SSH CLI. exe.dev VMs ship with a public hostname, TLS, and an HTTPS front door, so the Cloudflare Tunnel is unnecessary there — the front door is the ingress. Full flow for a fresh VM:</p>
+    <pre><code><span class="c"># hive block: { "port": 8101, "server": "mybot.exe.xyz",
+#               "dir": "/home/exedev/apps/mybot", "domain": "mybot.example.com" }</span>
+hive exe new mybot        <span class="c"># create the VM, wait for DNS</span>
+hive bootstrap            <span class="c"># install hive + celld on it</span>
+hive deploy               <span class="c"># ship, restart, health-gate over ssh</span>
+hive exe share            <span class="c"># https://mybot.exe.xyz → :8101, public (or --private)</span>
+hive exe domain           <span class="c"># mybot.example.com live: DNS-only CNAME + registration</span></code></pre>
+    <p><code>exe domain</code> uses your Cloudflare credentials to create the CNAME and hard-requires <code>proxied: false</code> — exe.dev terminates TLS itself and orange-cloud records break it. Without cf credentials it prints the exact record to create and exits; re-run after creating it. Registration is verified via exe.dev's <code>domain ls</code> and retried, since their resolver lags yours.</p>
+    <p>The <code>--private</code> share mode keeps the proxy behind exe.dev login — the right default for internal tools.</p>
+  </section>
+
   <section id="env">
-    <h2>Environment variables</h2>
+    <h2><svg class="icon" viewBox="0 0 24 24"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg>Environment variables</h2>
     <div class="table-wrap">
       <table>
         <thead><tr><th>var</th><th>purpose</th></tr></thead>
@@ -358,7 +395,7 @@ curl http://127.0.0.1:&lt;port&gt;/</code></pre>
   </section>
 
   <section id="security">
-    <h2>Security notes</h2>
+    <h2><svg class="icon" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>Security notes</h2>
     <ul>
       <li>Bucket credentials = full fleet control (deployments, cell replicas, ownership records, node leases). Keep them in env vars or <code>~/.config/hive/*.env</code> — never in the repo.</li>
       <li>celld's internal/operator listener is unauthenticated. It never leaves loopback; the public listener binds <code>127.0.0.1</code> behind your proxy/tunnel.</li>
