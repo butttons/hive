@@ -343,12 +343,19 @@ func loadCwdApp() (*App, error) {
 	if err != nil {
 		return nil, fmt.Errorf("get working directory: %w", err)
 	}
-	return LoadApp(cwd)
+	app, err := LoadApp(cwd)
+	if err != nil {
+		return nil, err
+	}
+	if err := loadAppEnv(app); err != nil {
+		return nil, err
+	}
+	return app, nil
 }
 
-func remoteHive(server, cmd string, args []string) error {
-	sshArgs := append([]string{server, "hive", cmd}, args...)
-	c := exec.Command("ssh", sshArgs...)
+func remoteHive(server, dir, cmd string, args []string) error {
+	remoteCmd := fmt.Sprintf("cd %s && ~/.local/bin/hive %s", shellSingleQuote(dir), shellJoin(append([]string{cmd}, args...)))
+	c := exec.Command("ssh", server, remoteCmd)
 	c.Stdin = os.Stdin
 	c.Stdout = os.Stdout
 	c.Stderr = os.Stderr
@@ -359,9 +366,20 @@ func remoteHive(server, cmd string, args []string) error {
 				os.Exit(status.ExitStatus())
 			}
 		}
-		return fmt.Errorf("ssh %s hive %s failed: %w (is hive installed on the box?)", server, cmd, err)
+		return fmt.Errorf("ssh %s ~/.local/bin/hive %s failed: %w (is hive installed on the box?)", server, cmd, err)
 	}
 	return nil
+}
+
+func shellJoin(args []string) string {
+	var b strings.Builder
+	for i, a := range args {
+		if i > 0 {
+			b.WriteByte(' ')
+		}
+		b.WriteString(shellSingleQuote(a))
+	}
+	return b.String()
 }
 
 func cmdUp(ctx context.Context, args []string) error {
@@ -379,7 +397,15 @@ func cmdUp(ctx context.Context, args []string) error {
 		return err
 	}
 	if app.Hive.Server != "" && !*localFlag {
-		return remoteHive(app.Hive.Server, "up", append(fs.Args(), "--local"))
+		if err := syncAppEnvFile(app.Hive.Server, app); err != nil {
+			return err
+		}
+		remoteArgs := append([]string{}, fs.Args()...)
+		if *daemonFlag {
+			remoteArgs = append(remoteArgs, "--daemon")
+		}
+		remoteArgs = append(remoteArgs, "--local")
+		return remoteHive(app.Hive.Server, app.Dir, "up", remoteArgs)
 	}
 
 	r, err := selectRunner(*daemonFlag)
@@ -403,7 +429,7 @@ func cmdDown(ctx context.Context, args []string) error {
 		return err
 	}
 	if app.Hive.Server != "" && !*localFlag {
-		return remoteHive(app.Hive.Server, "down", append(fs.Args(), "--local"))
+		return remoteHive(app.Hive.Server, app.Dir, "down", append(fs.Args(), "--local"))
 	}
 
 	// Stop whichever backend is actually managing the node. Prefer daemon
@@ -455,7 +481,7 @@ func cmdStatus(ctx context.Context, args []string) error {
 		return err
 	}
 	if app.Hive.Server != "" && !*localFlag {
-		return remoteHive(app.Hive.Server, "status", append(fs.Args(), "--local"))
+		return remoteHive(app.Hive.Server, app.Dir, "status", append(fs.Args(), "--local"))
 	}
 
 	var st nodeStatus
@@ -726,26 +752,29 @@ func restartNode(ctx context.Context, app *App, daemon, local, jsonMode bool) er
 }
 
 func remoteRestart(app *App, daemon, jsonMode bool) error {
+	if err := syncAppEnvFile(app.Hive.Server, app); err != nil {
+		return err
+	}
 	downArgs := []string{"--local"}
 	if daemon {
 		downArgs = append(downArgs, "--daemon")
 	}
-	if err := runRemoteHive(app.Hive.Server, "down", downArgs, jsonMode); err != nil {
+	if err := runRemoteHive(app.Hive.Server, app.Dir, "down", downArgs, jsonMode); err != nil {
 		return fmt.Errorf("remote down: %w", err)
 	}
 	upArgs := []string{"--local"}
 	if daemon {
 		upArgs = append(upArgs, "--daemon")
 	}
-	if err := runRemoteHive(app.Hive.Server, "up", upArgs, jsonMode); err != nil {
+	if err := runRemoteHive(app.Hive.Server, app.Dir, "up", upArgs, jsonMode); err != nil {
 		return fmt.Errorf("remote up: %w", err)
 	}
 	return nil
 }
 
-func runRemoteHive(server, cmd string, args []string, toStderr bool) error {
-	sshArgs := append([]string{server, "hive", cmd}, args...)
-	c := exec.Command("ssh", sshArgs...)
+func runRemoteHive(server, dir, cmd string, args []string, toStderr bool) error {
+	remoteCmd := fmt.Sprintf("cd %s && ~/.local/bin/hive %s", shellSingleQuote(dir), shellJoin(append([]string{cmd}, args...)))
+	c := exec.Command("ssh", server, remoteCmd)
 	c.Stdin = os.Stdin
 	if toStderr {
 		c.Stdout = os.Stderr
@@ -758,10 +787,10 @@ func runRemoteHive(server, cmd string, args []string, toStderr bool) error {
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) {
 			if status, ok := exitErr.Sys().(syscall.WaitStatus); ok {
-				return fmt.Errorf("ssh %s hive %s exited %d: %w", server, cmd, status.ExitStatus(), err)
+				return fmt.Errorf("ssh %s ~/.local/bin/hive %s exited %d: %w", server, cmd, status.ExitStatus(), err)
 			}
 		}
-		return fmt.Errorf("ssh %s hive %s failed: %w (is hive installed on the box?)", server, cmd, err)
+		return fmt.Errorf("ssh %s ~/.local/bin/hive %s failed: %w (is hive installed on the box?)", server, cmd, err)
 	}
 	return nil
 }

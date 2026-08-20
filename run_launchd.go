@@ -34,30 +34,45 @@ func (launchdRunner) Up(ctx context.Context, app *App) error {
 		return fmt.Errorf("create watch dir: %w", err)
 	}
 
-	plist, err := launchdPlist(app, bin, args, watchDir)
+	wrapperPath := filepath.Join(hiveDir, "run.sh")
+	oldWrapper, _ := os.ReadFile(wrapperPath)
+	wrapperPath, err = writeRunWrapper(app, bin, args)
+	if err != nil {
+		return fmt.Errorf("write run wrapper: %w", err)
+	}
+	newWrapper, _ := os.ReadFile(wrapperPath)
+	plist, err := launchdPlist(app, wrapperPath, watchDir)
 	if err != nil {
 		return fmt.Errorf("generate plist: %w", err)
 	}
 	path := launchdPlistPath(app)
+
 	needsBootstrap := true
-	if existing, err := os.ReadFile(path); err == nil {
-		if bytes.Equal(existing, plist) {
-			needsBootstrap = false
-		} else {
-			if loaded, _ := launchdList(app); loaded {
-				if err := launchdBootout(app); err != nil {
-					return fmt.Errorf("stop old launchd job: %w", err)
-				}
+	if existing, err := os.ReadFile(path); err == nil && bytes.Equal(existing, plist) && bytes.Equal(oldWrapper, newWrapper) {
+		loaded, _ := launchdList(app)
+		if loaded {
+			st, _ := launchdStatus(ctx, app)
+			if st.Healthy {
+				fmt.Printf("node for %s is already up (launchd, healthy)\n", app.Name)
+				return nil
+			}
+			if err := launchdBootout(app); err != nil {
+				return fmt.Errorf("stop unhealthy launchd job: %w", err)
 			}
 		}
+		needsBootstrap = true
+	} else if loaded, _ := launchdList(app); loaded {
+		if err := launchdBootout(app); err != nil {
+			return fmt.Errorf("stop old launchd job: %w", err)
+		}
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return fmt.Errorf("create LaunchAgents dir: %w", err)
+	}
+	if err := os.WriteFile(path, plist, 0o644); err != nil {
+		return fmt.Errorf("write plist: %w", err)
 	}
 	if needsBootstrap {
-		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-			return fmt.Errorf("create LaunchAgents dir: %w", err)
-		}
-		if err := os.WriteFile(path, plist, 0o644); err != nil {
-			return fmt.Errorf("write plist: %w", err)
-		}
 		if err := launchdBootstrap(app, path); err != nil {
 			return fmt.Errorf("bootstrap launchd job: %w", err)
 		}
@@ -65,27 +80,7 @@ func (launchdRunner) Up(ctx context.Context, app *App) error {
 			return fmt.Errorf("node did not become healthy: %s", msg)
 		}
 		fmt.Printf("node for %s is up (launchd)\n", app.Name)
-		return nil
 	}
-
-	loaded, _ := launchdList(app)
-	if loaded {
-		st, _ := launchdStatus(ctx, app)
-		if st.Healthy {
-			fmt.Printf("node for %s is already up (launchd, healthy)\n", app.Name)
-			return nil
-		}
-		if err := launchdBootout(app); err != nil {
-			return fmt.Errorf("stop unhealthy launchd job: %w", err)
-		}
-	}
-	if err := launchdBootstrap(app, path); err != nil {
-		return fmt.Errorf("bootstrap launchd job: %w", err)
-	}
-	if ok, msg := waitForHealth(ctx, app); !ok {
-		return fmt.Errorf("node did not become healthy: %s", msg)
-	}
-	fmt.Printf("node for %s is up (launchd)\n", app.Name)
 	return nil
 }
 
@@ -128,6 +123,13 @@ func launchdBootstrap(app *App, path string) error {
 	if err != nil {
 		return fmt.Errorf("launchctl bootstrap: %s: %w", strings.TrimSpace(string(out)), err)
 	}
+	// Bootstrap from a non-GUI session (e.g. SSH) loads the job but does not
+	// always start it. Kickstart ensures it runs before we wait for health.
+	cmd = exec.Command("launchctl", "kickstart", launchdDomain()+"/"+launchdLabel(app))
+	out, err = cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("launchctl kickstart: %s: %w", strings.TrimSpace(string(out)), err)
+	}
 	return nil
 }
 
@@ -164,21 +166,8 @@ func launchdStatus(ctx context.Context, app *App) (nodeStatus, error) {
 	return st, nil
 }
 
-func launchdPlist(app *App, bin string, args []string, watchDir string) ([]byte, error) {
+func launchdPlist(app *App, wrapperPath string, watchDir string) ([]byte, error) {
 	hiveDir := filepath.Join(app.Dir, ".hive")
-	env := map[string]string{
-		"CELLD_WATCH": watchDir,
-	}
-	for _, k := range []string{
-		"PATH", "HOME", "CELLD_BUCKET", "CELLD_ESBUILD",
-		"S3_ENDPOINT", "AWS_REGION", "AWS_DEFAULT_REGION",
-		"AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN",
-		"RUST_LOG",
-	} {
-		if v := os.Getenv(k); v != "" {
-			env[k] = v
-		}
-	}
 
 	var buf bytes.Buffer
 	buf.WriteString(`<?xml version="1.0" encoding="UTF-8"?>` + "\n")
@@ -191,17 +180,9 @@ func launchdPlist(app *App, bin string, args []string, watchDir string) ([]byte,
 	writePlistString(&buf, "StandardErrorPath", filepath.Join(hiveDir, "node.log"))
 
 	buf.WriteString("\t<key>ProgramArguments</key>\n\t<array>\n")
-	buf.WriteString("\t\t<string>" + plistEscape(bin) + "</string>\n")
-	for _, a := range args {
-		buf.WriteString("\t\t<string>" + plistEscape(a) + "</string>\n")
-	}
+	buf.WriteString("\t\t<string>/bin/sh</string>\n")
+	buf.WriteString("\t\t<string>" + plistEscape(wrapperPath) + "</string>\n")
 	buf.WriteString("\t</array>\n")
-
-	buf.WriteString("\t<key>EnvironmentVariables</key>\n\t<dict>\n")
-	for k, v := range env {
-		writePlistString(&buf, k, v)
-	}
-	buf.WriteString("\t</dict>\n")
 
 	buf.WriteString("\t<key>KeepAlive</key>\n\t<true/>\n")
 	buf.WriteString("\t<key>RunAtLoad</key>\n\t<true/>\n")

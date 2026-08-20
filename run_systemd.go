@@ -33,13 +33,21 @@ func (systemdRunner) Up(ctx context.Context, app *App) error {
 		return fmt.Errorf("create watch dir: %w", err)
 	}
 
-	unit, err := systemdUnit(app, bin, args, watchDir)
+	wrapperPath := filepath.Join(hiveDir, "run.sh")
+	oldWrapper, _ := os.ReadFile(wrapperPath)
+	wrapperPath, err = writeRunWrapper(app, bin, args)
+	if err != nil {
+		return fmt.Errorf("write run wrapper: %w", err)
+	}
+	newWrapper, _ := os.ReadFile(wrapperPath)
+
+	unit, err := systemdUnit(app, wrapperPath, watchDir)
 	if err != nil {
 		return fmt.Errorf("generate unit: %w", err)
 	}
 	path := systemdUnitPath(app)
 	needsStart := true
-	if existing, err := os.ReadFile(path); err == nil && bytes.Equal(existing, unit) {
+	if existing, err := os.ReadFile(path); err == nil && bytes.Equal(existing, unit) && bytes.Equal(oldWrapper, newWrapper) {
 		active, _ := systemdIsActive(app)
 		if active {
 			st, _ := systemdStatus(ctx, app)
@@ -163,7 +171,7 @@ func systemdStatus(ctx context.Context, app *App) (nodeStatus, error) {
 	return st, nil
 }
 
-func systemdUnit(app *App, bin string, args []string, watchDir string) ([]byte, error) {
+func systemdUnit(app *App, wrapperPath string, watchDir string) ([]byte, error) {
 	hiveDir := filepath.Join(app.Dir, ".hive")
 	var buf bytes.Buffer
 	buf.WriteString("[Unit]\n")
@@ -172,28 +180,9 @@ func systemdUnit(app *App, bin string, args []string, watchDir string) ([]byte, 
 	buf.WriteString("[Service]\n")
 	fmt.Fprintf(&buf, "Type=simple\n")
 	fmt.Fprintf(&buf, "WorkingDirectory=%s\n", app.Dir)
-	fmt.Fprintf(&buf, "ExecStart=%s %s\n", bin, strings.Join(systemdEscapeArgs(args), " "))
+	fmt.Fprintf(&buf, "ExecStart=%s\n", wrapperPath)
 	fmt.Fprintf(&buf, "Restart=always\n")
 	fmt.Fprintf(&buf, "RestartSec=1\n")
-
-	for _, kv := range []struct{ k, v string }{
-		{"CELLD_WATCH", watchDir},
-		{"CELLD_BUCKET", os.Getenv("CELLD_BUCKET")},
-		{"CELLD_ESBUILD", os.Getenv("CELLD_ESBUILD")},
-		{"S3_ENDPOINT", os.Getenv("S3_ENDPOINT")},
-		{"AWS_REGION", os.Getenv("AWS_REGION")},
-		{"AWS_DEFAULT_REGION", os.Getenv("AWS_DEFAULT_REGION")},
-		{"AWS_ACCESS_KEY_ID", os.Getenv("AWS_ACCESS_KEY_ID")},
-		{"AWS_SECRET_ACCESS_KEY", os.Getenv("AWS_SECRET_ACCESS_KEY")},
-		{"AWS_SESSION_TOKEN", os.Getenv("AWS_SESSION_TOKEN")},
-		{"RUST_LOG", os.Getenv("RUST_LOG")},
-		{"PATH", os.Getenv("PATH")},
-		{"HOME", os.Getenv("HOME")},
-	} {
-		if kv.v != "" {
-			fmt.Fprintf(&buf, "Environment=%s=%s\n", kv.k, systemdEscapeEnv(kv.v))
-		}
-	}
 
 	fmt.Fprintf(&buf, "StandardOutput=append:%s\n", filepath.Join(hiveDir, "node.log"))
 	fmt.Fprintf(&buf, "StandardError=append:%s\n", filepath.Join(hiveDir, "node.log"))
@@ -202,17 +191,3 @@ func systemdUnit(app *App, bin string, args []string, watchDir string) ([]byte, 
 	return buf.Bytes(), nil
 }
 
-func systemdEscapeArgs(args []string) []string {
-	out := make([]string, len(args))
-	for i, a := range args {
-		out[i] = "\"" + strings.ReplaceAll(a, "\"", "\\\"") + "\""
-	}
-	return out
-}
-
-func systemdEscapeEnv(v string) string {
-	v = strings.ReplaceAll(v, "\\", "\\\\")
-	v = strings.ReplaceAll(v, "\"", "\\\"")
-	v = strings.ReplaceAll(v, "\n", "\\n")
-	return v
-}

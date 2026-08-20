@@ -65,7 +65,7 @@ func celldBucketEnv() (string, error) {
 	if b == "" {
 		return "", fmt.Errorf("CELLD_BUCKET is not set (run `source env.sh` or use `hive init` when available)")
 	}
-	return b, nil
+	return strings.TrimPrefix(b, "s3://"), nil
 }
 
 func celldArgs(app *App) ([]string, error) {
@@ -152,6 +152,31 @@ func waitForHealth(ctx context.Context, app *App) (bool, string) {
 	}
 	ok, err := healthCheck(ctx, app)
 	return ok, err
+}
+
+func writeRunWrapper(app *App, bin string, args []string) (string, error) {
+	hiveDir := filepath.Join(app.Dir, ".hive")
+	if err := os.MkdirAll(hiveDir, 0o755); err != nil {
+		return "", fmt.Errorf("create %s: %w", hiveDir, err)
+	}
+	path := filepath.Join(hiveDir, "run.sh")
+	envFile := appEnvFilePath(app)
+
+	var b strings.Builder
+	fmt.Fprintln(&b, "#!/bin/sh")
+	fmt.Fprintln(&b, "set -e")
+	fmt.Fprintf(&b, ". %s\n", shellSingleQuote(envFile))
+	fmt.Fprint(&b, "exec")
+	fmt.Fprintf(&b, " %s", shellSingleQuote(bin))
+	for _, a := range args {
+		fmt.Fprintf(&b, " %s", shellSingleQuote(a))
+	}
+	fmt.Fprintln(&b)
+
+	if err := os.WriteFile(path, []byte(b.String()), 0o755); err != nil {
+		return "", fmt.Errorf("write wrapper: %w", err)
+	}
+	return path, nil
 }
 
 func waitForPortClosed(ctx context.Context, port int) error {
