@@ -33,13 +33,25 @@ Two files per app project, same directory:
 
 `registry.go` already loads this. `port` is required; `domain` and `server` optional (local-only apps skip them).
 
+## Remote model / server field (settled)
+
+- `hive.server` is an **SSH host** (`user@host`).
+- No `server` = operate locally.
+- `server` set = the local CLI proxies to the hive binary installed on the box: `ssh <server> hive <cmd> <args> --local`. One implementation of the run backends, no RPC protocol.
+- `celld deploy` itself is bucket-direct from anywhere; only node restart + health checks touch the box.
+- CI/CD = self-hosted GitHub Actions runner on the box (outbound-only, matches zero-inbound-ports posture); the workflow just runs `hive deploy` locally on the box.
+
 ## Command surface (settled; all stubbed in commands.go)
 
 - `hive add` — scaffold a new app project (wrangler.jsonc + index.ts + tsconfig + package.json with hive block), allocate a free port.
 - `hive check` — thin compat gate: validate wrangler.jsonc against the celld-legal key list and attempt the deploy path; report yes/no with celld's own errors. Deliberately dumb — celld fails loud, we relay.
 - `hive deploy` — typecheck (`tsc -b`) → `celld deploy` → restart the app's node → wait for `/__celld/health` ok. **The restart is the reload** — there is no watch mode or HMR; the loop is `edit → hive deploy → curl` and agents drive it.
-- `hive up` / `hive down` — start/stop the node for the current app. Two run backends behind one interface: **launchd** (macOS, plist + launchctl) and **systemd** (Linux). `down` is just SIGTERM — celld drains gracefully (health → 503, finishes in-flight, hands off cells). Idempotent: already-up is a no-op; config drift → restart.
-- `hive status` — apps, running nodes, live version IDs (from the bucket), health. `--json`.
+- `hive up` / `hive down` — start/stop the node for the current app. Three run backends behind one interface:
+  - **process** (default local dev): spawn `celld` detached, log to `.hive/node.log`, introspect port + `/__celld/health`, `down` = SIGTERM.
+  - **launchd** (macOS server): generated plist, `launchctl bootstrap/bootout`, drift → restart.
+  - **systemd** (Linux server): generated unit, `systemctl --user start/stop`, drift → restart.
+  Backend selection: `hive up` uses **process** by default; `hive up --daemon` uses launchd on macOS / systemd on Linux. `down` is SIGTERM — celld drains gracefully (health → 503, finishes in-flight, hands off cells). Idempotent: already-up is a no-op; config drift → restart.
+- `hive status` — current app config + node state (running, pid, backend, health). `--json` is the primary interface. Live version from the bucket is shown only when cheap to read; otherwise "unknown".
 - Later: `init` (bucket creds), `login` (OAuth), `tunnel` (ingress), `ui` (local dashboard).
 
 ## Ingress: remotely-managed Cloudflare Tunnels (settled)
@@ -77,10 +89,10 @@ Scaffold only. `main.go` (dispatch + usage), `registry.go` (loads app config —
 ## Build order (next steps, in order)
 
 1. `add` — template scaffolding + port allocation (dogfood by converting playground apps to hive projects).
-2. `up`/`down` local backend — plain process spawn + port/health introspection first, launchd second.
+2. `up`/`down` local backend — ✅ process backend done; launchd/systemd code written.
 3. `deploy` — tsc → celld deploy → restart → health gate. This completes the local loop; everything before the server work.
 4. `check` — celld-legal key list validation.
-5. launchd backend on the remote box; systemd backend (compile-gated, untested locally).
+5. launchd backend on the remote box (dry-run, not done); systemd backend (code written, untested locally).
 6. `tunnel` — REST-driven remotely-managed tunnel.
 7. `login`/`init` — OAuth + bucket provisioning (resolve the R2 S3-keys API gap first).
 8. `ui` — local SPA served from the binary via embed.FS; zero own logic, pure skin over `status --json`.
