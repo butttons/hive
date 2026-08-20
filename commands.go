@@ -25,6 +25,7 @@ func cmdDeploy(ctx context.Context, args []string) error {
 	jsonFlag := fs.Bool("json", false, "")
 	dockerFlag := fs.Bool("docker", false, "")
 	localFlag := fs.Bool("local", false, "")
+	noRestartFlag := fs.Bool("no-restart", false, "upload only; leave the node restart to someone else")
 	filterFlag := fs.String("filter", "", "")
 	fs.Var(&packagesFlags, "packages", "")
 	if err := fs.Parse(args); err != nil {
@@ -62,24 +63,24 @@ func cmdDeploy(ctx context.Context, args []string) error {
 			if err != nil {
 				return err
 			}
-			return runDeployAndPrint(ctx, app, *dockerFlag, *localFlag, *jsonFlag)
+			return runDeployAndPrint(ctx, app, *dockerFlag, *localFlag, *jsonFlag, *noRestartFlag)
 		}
-		return deployAll(ctx, apps, *dockerFlag, *localFlag, *jsonFlag)
+		return deployAll(ctx, apps, *dockerFlag, *localFlag, *jsonFlag, *noRestartFlag)
 	}
 
 	app, err := loadCwdApp()
 	if err != nil {
 		return fmt.Errorf("not in a hive app; use `hive deploy all`, `hive deploy --filter <name>`, or cd into an app")
 	}
-	return runDeployAndPrint(ctx, app, *dockerFlag, *localFlag, *jsonFlag)
+	return runDeployAndPrint(ctx, app, *dockerFlag, *localFlag, *jsonFlag, *noRestartFlag)
 }
 
-func deployAll(ctx context.Context, apps []*App, dockerFlag, localFlag, jsonFlag bool) error {
+func deployAll(ctx context.Context, apps []*App, dockerFlag, localFlag, jsonFlag, noRestart bool) error {
 	var results []deployResult
 	var failed int
 	start := time.Now()
 	for _, app := range apps {
-		res := runDeploy(ctx, app, dockerFlag, localFlag, jsonFlag)
+		res := runDeploy(ctx, app, dockerFlag, localFlag, jsonFlag, noRestart)
 		results = append(results, res)
 		if res.Error != "" {
 			failed++
@@ -107,8 +108,8 @@ func deployAll(ctx context.Context, apps []*App, dockerFlag, localFlag, jsonFlag
 	return nil
 }
 
-func runDeployAndPrint(ctx context.Context, app *App, dockerFlag, localFlag, jsonFlag bool) error {
-	res := runDeploy(ctx, app, dockerFlag, localFlag, jsonFlag)
+func runDeployAndPrint(ctx context.Context, app *App, dockerFlag, localFlag, jsonFlag, noRestart bool) error {
+	res := runDeploy(ctx, app, dockerFlag, localFlag, jsonFlag, noRestart)
 	if jsonFlag {
 		b, err := json.MarshalIndent(res, "", "  ")
 		if err != nil {
@@ -143,7 +144,7 @@ func runDeployAndPrint(ctx context.Context, app *App, dockerFlag, localFlag, jso
 	return nil
 }
 
-func runDeploy(ctx context.Context, app *App, dockerFlag, localFlag, jsonFlag bool) deployResult {
+func runDeploy(ctx context.Context, app *App, dockerFlag, localFlag, jsonFlag, noRestart bool) deployResult {
 	start := time.Now()
 	var steps []deployStep
 	var version string
@@ -163,6 +164,11 @@ func runDeploy(ctx context.Context, app *App, dockerFlag, localFlag, jsonFlag bo
 		return deployResult{App: app.Name, Version: version, Steps: steps, DurationMs: time.Since(start).Milliseconds(), Error: err.Error()}
 	}
 	steps = append(steps, st.done(true))
+
+	if noRestart {
+		steps = append(steps, startStep("restart").doneSkip(true), startStep("health").doneSkip(true))
+		return deployResult{App: app.Name, Version: version, Steps: steps, DurationMs: time.Since(start).Milliseconds()}
+	}
 
 	st = startStep("restart")
 	if err := restartNode(ctx, app, dockerFlag, localFlag, jsonFlag); err != nil {
