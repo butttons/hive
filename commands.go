@@ -602,13 +602,17 @@ func remoteStatusJSON(server string, app *App) (statusResult, error) {
 }
 
 func fetchLiveVersion(app *App) string {
-	bucket := os.Getenv("CELLD_BUCKET")
+	bucket := strings.TrimPrefix(os.Getenv("CELLD_BUCKET"), "s3://")
 	if bucket == "" {
 		return "unknown"
 	}
-	// Try to read the latest deployment manifest from the local object store.
-	// This is best-effort: credentials may be missing or the store unreachable.
-	return "unknown"
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	b, err := s3Get(ctx, bucket+"/"+app.Name+"/deploy/current.json")
+	if err != nil {
+		return "unknown"
+	}
+	return parseCurrentVersion(b)
 }
 
 type deployStep struct {
