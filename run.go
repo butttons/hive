@@ -62,7 +62,7 @@ func celldPath() (string, error) {
 func celldBucketEnv() (string, error) {
 	b := os.Getenv("CELLD_BUCKET")
 	if b == "" {
-		return "", fmt.Errorf("CELLD_BUCKET is not set (run `source env.sh` or use `hive init` when available)")
+		return "", fmt.Errorf("CELLD_BUCKET is not set (export it, or run `hive init`)")
 	}
 	return strings.TrimPrefix(b, "s3://"), nil
 }

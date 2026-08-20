@@ -202,7 +202,7 @@ func dockerEnvSpec(app *App, image string) ([]string, string, error) {
 	}
 	for _, k := range []string{"S3_ENDPOINT", "AWS_REGION", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"} {
 		if env[k] == "" {
-			return nil, "", fmt.Errorf("%s is not set (source env.sh or run hive init)", k)
+			return nil, "", fmt.Errorf("%s is not set (export it, or run hive init)", k)
 		}
 	}
 	keys := make([]string, 0, len(env))
