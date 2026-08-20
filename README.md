@@ -12,7 +12,13 @@ Go, stdlib only. Single static binary, zero dependencies, instant cold start.
 
 Cloudflare is optional: `login`/`init`/`tunnel` automate R2 + Tunnel + DNS, but any S3 credentials and any reverse proxy (caddy, nginx, your own tunnel) work just as well.
 
-## Build
+## Install
+
+```sh
+curl -fsSL https://hive.butttons.dev/setup.sh | bash
+```
+
+Installs the latest release binary to `~/.local/bin/hive` (checksum-verified; `HIVE_INSTALL_DIR` overrides). Or build from source:
 
 ```sh
 CGO_ENABLED=0 go build -o hive .

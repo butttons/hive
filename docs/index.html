@@ -241,7 +241,10 @@ footer {
   </section>
 
   <section id="build">
-    <h2>Build</h2>
+    <h2>Install</h2>
+    <pre><code>curl -fsSL https://hive.butttons.dev/setup.sh | bash</code></pre>
+    <p>Installs the latest release binary to <code>~/.local/bin/hive</code> (checksum-verified). Override the destination with <code>HIVE_INSTALL_DIR</code>.</p>
+    <p>Or build from source:</p>
     <pre><code>CGO_ENABLED=0 go build -o hive .</code></pre>
     <p>Cross-compiles to <code>GOOS/GOARCH</code> = <code>linux/amd64</code>, <code>linux/arm64</code>, <code>darwin/arm64</code> — same targets as celld.</p>
   </section>

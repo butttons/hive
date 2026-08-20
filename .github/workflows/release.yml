@@ -1,0 +1,85 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build binaries
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - goos: darwin
+            goarch: arm64
+          - goos: linux
+            goarch: amd64
+          - goos: linux
+            goarch: arm64
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: stable
+
+      - name: Vet and test
+        run: |
+          CGO_ENABLED=0 go vet ./...
+          CGO_ENABLED=0 go test ./...
+
+      - name: Build binary
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o "hive-$GOOS-$GOARCH" .
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: hive-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: hive-${{ matrix.goos }}-${{ matrix.goarch }}
+          retention-days: 1
+
+  release:
+    name: Create release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+
+      - name: Checksums
+        working-directory: dist
+        run: |
+          for d in hive-*; do
+            shasum -a 256 "$d/$d" | sed "s|$d/$d|$d|" >> checksums.txt
+          done
+          cat checksums.txt
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/hive-darwin-arm64/hive-darwin-arm64
+            dist/hive-linux-amd64/hive-linux-amd64
+            dist/hive-linux-arm64/hive-linux-arm64
+            dist/checksums.txt
+          generate_release_notes: true
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -10,6 +10,12 @@
 ## Install / build
 
 ```sh
+curl -fsSL https://hive.butttons.dev/setup.sh | bash
+```
+
+Installs the latest release binary to `~/.local/bin/hive` (checksum-verified; `HIVE_INSTALL_DIR` overrides). Or build from source:
+
+```sh
 CGO_ENABLED=0 go build -o hive .
 ```
 
