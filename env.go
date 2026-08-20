@@ -31,18 +31,16 @@ func appEnvFilePath(app *App) string {
 	return filepath.Join(home, ".config", "hive", app.Name+".env")
 }
 
-// loadAppEnv sources ~/.config/hive/<app>.env into the process environment
-// for keys that are not already set. It lets a box keep credentials out of
-// plist/unit files while still making them available to local commands.
-func loadAppEnv(app *App) error {
-	path := appEnvFilePath(app)
+// readEnvFile parses a shell-sourcable env file into a key/value map.
+// Empty lines, comments, and malformed lines are ignored. Values are
+// unquoted using shell single-quote rules and CELLD_BUCKET is normalized
+// to drop the s3:// prefix.
+func readEnvFile(path string) (map[string]string, error) {
 	b, err := os.ReadFile(path)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
-		return fmt.Errorf("read env file %s: %w", path, err)
+		return nil, err
 	}
+	kv := make(map[string]string)
 	for _, line := range strings.Split(string(b), "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" || strings.HasPrefix(line, "#") {
@@ -53,11 +51,29 @@ func loadAppEnv(app *App) error {
 			continue
 		}
 		k = strings.TrimSpace(k)
+		v = unquoteShell(v)
+		if k == "CELLD_BUCKET" {
+			v = strings.TrimPrefix(v, "s3://")
+		}
+		kv[k] = v
+	}
+	return kv, nil
+}
+
+// loadAppEnv sources ~/.config/hive/<app>.env into the process environment
+// for keys that are not already set. It lets a box keep credentials out of
+// plist/unit files while still making them available to local commands.
+func loadAppEnv(app *App) error {
+	path := appEnvFilePath(app)
+	kv, err := readEnvFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("read env file %s: %w", path, err)
+	}
+	for k, v := range kv {
 		if os.Getenv(k) == "" {
-			v = unquoteShell(v)
-			if k == "CELLD_BUCKET" {
-				v = strings.TrimPrefix(v, "s3://")
-			}
 			os.Setenv(k, v)
 		}
 	}

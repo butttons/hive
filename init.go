@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 )
@@ -163,15 +164,52 @@ func appEnvDir() string {
 	return home + "/.config/hive"
 }
 
+// findReusedCreds scans ~/.config/hive/*.env for an existing app whose
+// CELLD_BUCKET matches bucket and returns its S3 credential keys. Unreadable
+// or malformed env files are skipped silently.
+func findReusedCreds(bucket string) (map[string]string, bool) {
+	dir := appEnvDir()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, false
+	}
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".env") {
+			continue
+		}
+		path := filepath.Join(dir, e.Name())
+		kv, err := readEnvFile(path)
+		if err != nil {
+			continue
+		}
+		if kv["CELLD_BUCKET"] != bucket {
+			continue
+		}
+		creds := make(map[string]string)
+		for _, k := range []string{"AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "S3_ENDPOINT", "AWS_REGION"} {
+			if v := kv[k]; v != "" {
+				creds[k] = v
+			}
+		}
+		if creds["AWS_ACCESS_KEY_ID"] == "" || creds["AWS_SECRET_ACCESS_KEY"] == "" || creds["S3_ENDPOINT"] == "" {
+			continue
+		}
+		return creds, true
+	}
+	return nil, false
+}
+
 func cmdInit(ctx context.Context, args []string) error {
-	args = normalizeFlags(args, map[string]bool{"bucket": true, "jurisdiction": true, "access-key": true, "secret-key": true})
+	args = normalizeFlags(args, map[string]bool{"bucket": true, "jurisdiction": true, "access-key": true, "secret-key": true, "endpoint": true, "region": true})
 	fs := flag.NewFlagSet("init", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	jsonFlag := fs.Bool("json", false, "")
-	bucketFlag := fs.String("bucket", "", "R2 bucket name (created if missing)")
+	bucketFlag := fs.String("bucket", "", "S3 bucket name (created on Cloudflare only if missing)")
 	jurisdiction := fs.String("jurisdiction", "", "bucket jurisdiction (e.g. eu)")
-	accessKey := fs.String("access-key", "", "existing R2 Access Key ID")
-	secretKey := fs.String("secret-key", "", "existing R2 Secret Access Key")
+	accessKey := fs.String("access-key", "", "existing S3 Access Key ID")
+	secretKey := fs.String("secret-key", "", "existing S3 Secret Access Key")
+	endpointFlag := fs.String("endpoint", "", "S3 endpoint URL")
+	regionFlag := fs.String("region", "auto", "S3 region")
 	force := fs.Bool("force", false, "")
 	if err := fs.Parse(args); err != nil {
 		return fmt.Errorf("parse flags: %w", err)
@@ -184,64 +222,92 @@ func cmdInit(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	accountID, err := discoverAccount(ctx)
-	if err != nil {
-		return err
-	}
 
-	buckets, err := listBuckets(ctx, accountID)
-	if err != nil {
-		return err
-	}
 	bucket := *bucketFlag
-	createdBucket := false
-	if bucket == "" {
-		switch len(buckets) {
-		case 0:
-			return fmt.Errorf("no buckets in this account; pass --bucket to create one")
-		case 1:
-			bucket = buckets[0].Name
-		default:
-			names := make([]string, 0, len(buckets))
-			for _, b := range buckets {
-				names = append(names, b.Name)
-			}
-			return fmt.Errorf("multiple buckets (%s); pass --bucket", strings.Join(names, ", "))
-		}
-	} else {
-		found := false
-		for _, b := range buckets {
-			if b.Name == bucket {
-				found = true
-			}
-		}
-		if !found {
-			if err := createBucket(ctx, accountID, bucket, *jurisdiction); err != nil {
-				return fmt.Errorf("create bucket %s: %w", bucket, err)
-			}
-			createdBucket = true
-		}
-	}
+	var env map[string]string
+	var credSource string
+	var createdBucket bool
 
-	var keyID, keySecret, credSource string
 	if *accessKey != "" {
-		keyID, keySecret, credSource = *accessKey, *secretKey, "pasted"
-	} else {
-		keyID, keySecret, err = mintR2Token(ctx, accountID, bucket, *jurisdiction, "hive-"+app.Name+"-"+bucket)
-		if err != nil {
-			link := fmt.Sprintf("https://dash.cloudflare.com/%s/r2/api-tokens", accountID)
-			return fmt.Errorf("mint R2 API token: %w\nfallback: create one at %s (Object Read & Write on %s), then rerun with --access-key/--secret-key", err, link, bucket)
+		if bucket == "" {
+			return fmt.Errorf("pass --bucket when using --access-key/--secret-key")
 		}
-		credSource = "minted"
+		if *endpointFlag == "" {
+			return fmt.Errorf("pass --endpoint when using --access-key/--secret-key")
+		}
+		env = map[string]string{
+			"CELLD_BUCKET":          bucket,
+			"S3_ENDPOINT":           *endpointFlag,
+			"AWS_REGION":            *regionFlag,
+			"AWS_ACCESS_KEY_ID":     *accessKey,
+			"AWS_SECRET_ACCESS_KEY": *secretKey,
+		}
+		credSource = "pasted"
+	} else {
+		if bucket != "" {
+			if reused, ok := findReusedCreds(bucket); ok {
+				env = reused
+				env["CELLD_BUCKET"] = bucket
+				if _, ok := env["AWS_REGION"]; !ok {
+					env["AWS_REGION"] = *regionFlag
+				}
+				credSource = "reused"
+			}
+		}
+		if env == nil {
+			accountID, err := discoverAccount(ctx)
+			if err != nil {
+				return err
+			}
+			buckets, err := listBuckets(ctx, accountID)
+			if err != nil {
+				return err
+			}
+			if bucket == "" {
+				switch len(buckets) {
+				case 0:
+					return fmt.Errorf("no buckets in this account; pass --bucket to create one")
+				case 1:
+					bucket = buckets[0].Name
+				default:
+					names := make([]string, 0, len(buckets))
+					for _, b := range buckets {
+						names = append(names, b.Name)
+					}
+					return fmt.Errorf("multiple buckets (%s); pass --bucket", strings.Join(names, ", "))
+				}
+			} else {
+				found := false
+				for _, b := range buckets {
+					if b.Name == bucket {
+						found = true
+						break
+					}
+				}
+				if !found {
+					if err := createBucket(ctx, accountID, bucket, *jurisdiction); err != nil {
+						return fmt.Errorf("create bucket %s: %w", bucket, err)
+					}
+					createdBucket = true
+				}
+			}
+
+			keyID, keySecret, err := mintR2Token(ctx, accountID, bucket, *jurisdiction, "hive-"+app.Name+"-"+bucket)
+			if err != nil {
+				link := fmt.Sprintf("https://dash.cloudflare.com/%s/r2/api-tokens", accountID)
+				return fmt.Errorf("mint R2 API token: %w\nfallback: create one at %s (Object Read & Write on %s), then rerun with --access-key/--secret-key", err, link, bucket)
+			}
+			credSource = "minted"
+			env = map[string]string{
+				"CELLD_BUCKET":          bucket,
+				"S3_ENDPOINT":           r2Endpoint(accountID, *jurisdiction),
+				"AWS_REGION":            *regionFlag,
+				"AWS_ACCESS_KEY_ID":     keyID,
+				"AWS_SECRET_ACCESS_KEY": keySecret,
+			}
+		}
 	}
 
-	env := map[string]string{
-		"CELLD_BUCKET":          bucket,
-		"S3_ENDPOINT":           r2Endpoint(accountID, *jurisdiction),
-		"AWS_REGION":            "auto",
-		"AWS_ACCESS_KEY_ID":     keyID,
-		"AWS_SECRET_ACCESS_KEY": keySecret,
-	}
 	if err := writeAppEnvFile(app, env, *force); err != nil {
 		return err
 	}
