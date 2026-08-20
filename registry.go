@@ -10,9 +10,10 @@ import (
 // HiveConfig is the "hive" block in the app's package.json. It holds
 // everything celld's wrangler.jsonc parser would reject.
 type HiveConfig struct {
-	Port   int    `json:"port"`
-	Domain string `json:"domain,omitempty"`
-	Server string `json:"server,omitempty"` // ssh host for the run backend
+	Port    int    `json:"port"`
+	Domain  string `json:"domain,omitempty"`
+	Server  string `json:"server,omitempty"`  // ssh host for the run backend
+	Backend string `json:"backend,omitempty"` // "docker" for a container node; default is a plain process
 }
 
 // App is one deployable celld project: a wrangler.jsonc plus a "hive" block

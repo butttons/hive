@@ -279,7 +279,7 @@ func cmdDeploy(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("deploy", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	jsonFlag := fs.Bool("json", false, "")
-	daemonFlag := fs.Bool("daemon", false, "")
+	dockerFlag := fs.Bool("docker", false, "")
 	localFlag := fs.Bool("local", false, "")
 	if err := fs.Parse(args); err != nil {
 		return fmt.Errorf("parse flags: %w", err)
@@ -313,7 +313,7 @@ func cmdDeploy(ctx context.Context, args []string) error {
 	steps = append(steps, st.done(true))
 
 	st = startStep("restart")
-	if err := restartNode(ctx, app, *daemonFlag, *localFlag, *jsonFlag); err != nil {
+	if err := restartNode(ctx, app, *dockerFlag, *localFlag, *jsonFlag); err != nil {
 		steps = append(steps, st.done(false))
 		printDeployResult(app, version, steps, start, *jsonFlag, err)
 		return err
@@ -384,7 +384,7 @@ func cmdUp(ctx context.Context, args []string) error {
 	args = normalizeFlags(args, map[string]bool{})
 	fs := flag.NewFlagSet("up", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
-	daemonFlag := fs.Bool("daemon", false, "")
+	dockerFlag := fs.Bool("docker", false, "")
 	localFlag := fs.Bool("local", false, "")
 	if err := fs.Parse(args); err != nil {
 		return fmt.Errorf("parse flags: %w", err)
@@ -399,18 +399,14 @@ func cmdUp(ctx context.Context, args []string) error {
 			return err
 		}
 		remoteArgs := append([]string{}, fs.Args()...)
-		if *daemonFlag {
-			remoteArgs = append(remoteArgs, "--daemon")
+		if *dockerFlag {
+			remoteArgs = append(remoteArgs, "--docker")
 		}
 		remoteArgs = append(remoteArgs, "--local")
 		return remoteHive(app.Hive.Server, app.Dir, "up", remoteArgs)
 	}
 
-	r, err := selectRunner(*daemonFlag)
-	if err != nil {
-		return err
-	}
-	return r.Up(ctx, app)
+	return selectRunner(app, *dockerFlag).Up(ctx, app)
 }
 
 func cmdDown(ctx context.Context, args []string) error {
@@ -430,21 +426,14 @@ func cmdDown(ctx context.Context, args []string) error {
 		return remoteHive(app.Hive.Server, app.Dir, "down", append(fs.Args(), "--local"))
 	}
 
-	// Stop whichever backend is actually managing the node. Prefer daemon
-	// backends: a launchd/systemd job will restart a process we SIGTERM.
-	for _, r := range []runner{launchdRunner{}, systemdRunner{}} {
-		if r.Name() == "launchd" {
-			loaded, _ := launchdList(app)
-			if loaded {
-				return r.Down(ctx, app)
-			}
-		}
-		if r.Name() == "systemd" {
-			active, _ := systemdIsActive(app)
-			if active {
-				return r.Down(ctx, app)
-			}
-		}
+	// Stop whichever backend is actually managing the node: a docker
+	// container first, then a plain process holding the port.
+	_, _, exists, err := dockerInspect(ctx, app)
+	if err != nil {
+		return err
+	}
+	if exists {
+		return dockerRunner{}.Down(ctx, app)
 	}
 
 	st, err := processStatus(ctx, app)
@@ -483,7 +472,7 @@ func cmdStatus(ctx context.Context, args []string) error {
 	}
 
 	var st nodeStatus
-	for _, r := range []runner{processRunner{}, launchdRunner{}, systemdRunner{}} {
+	for _, r := range []runner{dockerRunner{}, processRunner{}} {
 		st, err = r.Status(ctx, app)
 		if err == nil && (st.Running || st.PID != 0) {
 			break
@@ -721,15 +710,12 @@ func extractVersion(output string) string {
 	return ""
 }
 
-func restartNode(ctx context.Context, app *App, daemon, local, jsonMode bool) error {
+func restartNode(ctx context.Context, app *App, dockerFlag, local, jsonMode bool) error {
 	if app.Hive.Server != "" && !local {
-		return remoteRestart(app, daemon, jsonMode)
+		return remoteRestart(app, dockerFlag, jsonMode)
 	}
 
-	r, err := selectRunner(daemon)
-	if err != nil {
-		return err
-	}
+	r := selectRunner(app, dockerFlag)
 	st, err := r.Status(ctx, app)
 	if err != nil {
 		return fmt.Errorf("check node status: %w", err)
@@ -749,20 +735,17 @@ func restartNode(ctx context.Context, app *App, daemon, local, jsonMode bool) er
 	return nil
 }
 
-func remoteRestart(app *App, daemon, jsonMode bool) error {
+func remoteRestart(app *App, dockerFlag, jsonMode bool) error {
 	if err := syncAppEnvFile(app.Hive.Server, app); err != nil {
 		return err
 	}
 	downArgs := []string{"--local"}
-	if daemon {
-		downArgs = append(downArgs, "--daemon")
-	}
 	if err := runRemoteHive(app.Hive.Server, app.Dir, "down", downArgs, jsonMode); err != nil {
 		return fmt.Errorf("remote down: %w", err)
 	}
 	upArgs := []string{"--local"}
-	if daemon {
-		upArgs = append(upArgs, "--daemon")
+	if dockerFlag {
+		upArgs = append(upArgs, "--docker")
 	}
 	if err := runRemoteHive(app.Hive.Server, app.Dir, "up", upArgs, jsonMode); err != nil {
 		return fmt.Errorf("remote up: %w", err)

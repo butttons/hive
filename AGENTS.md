@@ -46,11 +46,11 @@ Two files per app project, same directory:
 - `hive add` — scaffold a new app project (wrangler.jsonc + index.ts + tsconfig + package.json with hive block), allocate a free port.
 - `hive check` — thin compat gate: validate wrangler.jsonc against the celld-legal key list and attempt the deploy path; report yes/no with celld's own errors. Deliberately dumb — celld fails loud, we relay.
 - `hive deploy` — typecheck (`tsc -b`) → `celld deploy` → restart the app's node → wait for `/__celld/health` ok. **The restart is the reload** — there is no watch mode or HMR; the loop is `edit → hive deploy → curl` and agents drive it.
-- `hive up` / `hive down` — start/stop the node for the current app. Three run backends behind one interface:
-  - **process** (default local dev): spawn `celld` detached, log to `.hive/node.log`, introspect port + `/__celld/health`, `down` = SIGTERM.
-  - **launchd** (macOS server): generated plist, `launchctl bootstrap/bootout`, drift → restart.
-  - **systemd** (Linux server): generated unit, `systemctl --user start/stop`, drift → restart.
-  Backend selection: `hive up` uses **process** by default; `hive up --daemon` uses launchd on macOS / systemd on Linux. `down` is SIGTERM — celld drains gracefully (health → 503, finishes in-flight, hands off cells). Idempotent: already-up is a no-op; config drift → restart.
+- `hive up` / `hive down` — start/stop the node for the current app. Two run backends behind one interface:
+  - **process** (default): spawn `celld` detached, log to `.hive/node.log`, introspect port + `/__celld/health`, `down` = SIGTERM. Zero moving parts, but no supervisor — a reboot leaves the node down until the next `hive up`.
+  - **docker** (`--docker` or `"backend": "docker"` in the hive block): node runs as container `hive-<app>` from image `hive/celld:<version>` (built on demand from the official celld release binary on debian-slim), published on `127.0.0.1:<port>`, `--restart unless-stopped`, env via a generated 0600 `--env-file`, drift detected by a `hive.config` label hash → recreate. `docker stop` is the graceful SIGTERM drain. This is the box story — the remote box runs docker.
+  `down` is SIGTERM either way — celld drains gracefully (health → 503, finishes in-flight, hands off cells). Idempotent: already-up is a no-op; config drift → restart. launchd/systemd backends were cut (git history has them); docker subsumes them.
+- Deployment targets = celld's targets: linux/amd64, linux/arm64, darwin/arm64 — bare box or docker. A bare box needs exactly two binaries (`hive`, `celld`) plus docker if the docker backend is wanted.
 - `hive status` — current app config + node state (running, pid, backend, health). `--json` is the primary interface. Live version from the bucket is shown only when cheap to read; otherwise "unknown".
 - Later: `init` (bucket creds), `login` (OAuth), `tunnel` (ingress), `ui` (local dashboard).
 
@@ -99,7 +99,7 @@ Two files per app project, same directory:
 - Version ID: celld prints `Current Version ID: <16-char hex>` on success (e.g. `d733f37ce356fc35`). `hive deploy --json` surfaces this as `"version"`.
 - Health gate: after restart, poll `GET 127.0.0.1:<port>/__celld/health` until `{"ok":true}` or a 30 s timeout. On timeout, error and point at `.hive/node.log`.
 - Typecheck: run `tsc -b` in the app directory; use `node_modules/.bin/tsc` if found (walking up from the app dir for monorepo layouts), else `tsc` on PATH. Skip with a note if no `tsconfig.json`.
-- Remote restart: when `hive.server` is set, `celld deploy` still runs locally (bucket-direct); only restart+health proxy over `ssh <server> hive down --local [--daemon]` then `ssh <server> hive up --local [--daemon]`.
+- Remote restart: when `hive.server` is set, `celld deploy` still runs locally (bucket-direct); only restart+health proxy over `ssh <server> hive down --local` then `ssh <server> hive up --local [--docker]`.
 
 ## Test environments (live)
 

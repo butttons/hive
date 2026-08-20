@@ -9,8 +9,9 @@ import (
 )
 
 // envFileKeys are the environment variables persisted for a celld node.
-// They are written to ~/.config/hive/<app>.env and sourced by the launchd/
-// systemd wrapper. Secrets (AWS_*) never appear in generated plists or units.
+// They are written to ~/.config/hive/<app>.env, loaded by loadAppEnv for
+// local commands and synced to servers over ssh. Secrets (AWS_*) never
+// appear in generated config committed anywhere.
 var envFileKeys = []string{
 	"PATH",
 	"HOME",
