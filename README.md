@@ -2,7 +2,7 @@
 
 A wrangler-shaped CLI for [celld](https://celld.dev/docs) — Deno's self-hosted, distributed Durable Objects daemon. Bring your existing Worker; hive tells you if it runs on celld, then deploys and runs it on your own hardware.
 
-Go, stdlib only. Single static binary, zero dependencies.
+Go, stdlib only. Single static binary, zero dependencies, instant cold start.
 
 ## What you need
 
@@ -28,19 +28,20 @@ cd myapp
 
 # credentials: either export AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY /
 # S3_ENDPOINT / AWS_REGION / CELLD_BUCKET yourself, or provision with:
-hive login                # Cloudflare OAuth consent (optional)
-hive init --bucket mybucket
+hive init --bucket mybucket --access-key ... --secret-key ... --endpoint ...
 
 hive check                # will this deploy to celld?
 hive deploy               # tsc → celld deploy → restart node → health gate
 curl http://127.0.0.1:<port>/
 ```
 
+There is no watch mode or HMR — the restart is the reload. The loop is `edit → hive deploy → curl`.
+
 ## Config model
 
 Two files per app, same directory:
 
-- `wrangler.jsonc` — pristine, celld-legal keys only (`name`, `main`, `compatibility_date`, `durable_objects`, `migrations`, …). This is the deploy contract handed to celld untouched.
+- `wrangler.jsonc` — pristine, celld-legal keys only (`name`, `main`, `compatibility_date`, `durable_objects`, `migrations`, `vars`, `assets`, `services`, …). This is the deploy contract handed to celld untouched. celld hard-fails on anything else.
 - `package.json` — a `"hive"` block for everything celld rejects:
 
 ```json
@@ -49,38 +50,65 @@ Two files per app, same directory:
 }
 ```
 
-`port` is required. `domain`, `server`, `backend` are optional.
+`port` is required. `domain`, `server`, `backend` are optional (local-only apps skip them).
 
 ## Commands
 
-| command | what it does |
-| --- | --- |
-| `hive add <name>` | Scaffold a new app (wrangler.jsonc + index.ts + tsconfig + package.json), allocate a free port |
-| `hive check` | Validate wrangler.jsonc against the celld-legal key list, dry-run the deploy path |
-| `hive deploy` | Typecheck → `celld deploy` → restart the node → wait for `/__celld/health` |
-| `hive up` / `hive down` | Start/stop the node. Idempotent; drift → restart |
-| `hive status` | App config + node state. `--json` is the primary interface |
-| `hive login` | Cloudflare OAuth (PKCE). `--export` prints `export CLOUDFLARE_API_TOKEN=…` instead of saving |
-| `hive init` | Provision an R2 bucket + S3 key pair into `~/.config/hive/<app>.env` (0600) |
-| `hive tunnel` | Create/sync a remotely-managed Cloudflare Tunnel: ingress rules + DNS, prints the box install command |
+Every command takes `--json` and prints machine-readable output. Agents are the primary user.
 
-Every command takes `--json`. Exit codes are meaningful; errors come from celld/Cloudflare unchanged.
+| command | flags | what it does |
+| --- | --- | --- |
+| `hive add <name>` | `--port`, `--force` | Scaffold a new app (wrangler.jsonc + index.ts + tsconfig + package.json), allocate a free port |
+| `hive check` | | Validate wrangler.jsonc against the celld-legal key list, dry-run the deploy path. Deliberately dumb — celld fails loud, hive relays |
+| `hive deploy` | `--docker`, `--local` | Typecheck (`tsc -b`) → `celld deploy` → restart the node → wait for `/__celld/health` (30s gate). Prints the version ID |
+| `hive up` | `--docker`, `--local` | Start the node. Idempotent; config drift → restart |
+| `hive down` | `--local` | Stop the node gracefully (SIGTERM; celld drains in-flight work) |
+| `hive status` | `--local` | App config + node state (running, pid, backend, health) |
+| `hive init` | `--bucket`, `--access-key`, `--secret-key`, `--endpoint`, `--region`, `--jurisdiction`, `--force` | Provision bucket credentials into `~/.config/hive/<app>.env` (0600) |
+| `hive login` | `--status`, `--export`, `--no-browser` | Cloudflare OAuth consent (PKCE); stores a refreshable token |
+| `hive tunnel` | `--name`, `--ssh` | Create/sync a remotely-managed Cloudflare Tunnel: ingress rules + DNS, prints the box install command |
+
+### `hive init` credential chain
+
+In order — first match wins:
+
+1. `--access-key` + `--secret-key` + `--endpoint` flags — zero Cloudflare calls, works with any S3 provider.
+2. Reuse from a sibling app: an existing `~/.config/hive/<app>.env` with a matching `CELLD_BUCKET`.
+3. Cloudflare path: bucket create (if missing) + S3 key mint. The mint needs `CLOUDFLARE_API_TOKEN` with **API Tokens Edit**; OAuth tokens can't mint keys (Cloudflare's self-managed OAuth catalog has no API Tokens scope).
+4. Otherwise: a deep link to the R2 S3-keys page; paste the pair with `--access-key`/`--secret-key`.
+
+### `hive login`
+
+Self-managed Cloudflare OAuth (authorization code + PKCE, no client secret). Default public client ID is compiled in; override with `HIVE_CF_CLIENT_ID` (register your own client for production use). Scopes: `argotunnel.write dns.write zone.read workers-r2.write`. Tokens live at `~/.config/hive/auth.json` (0600) and refresh automatically. `--export` prints `export CLOUDFLARE_API_TOKEN=…` instead of saving.
 
 ## Run backends
 
-- **process** (default): `celld` as a detached process, logs to `.hive/node.log`, `down` = SIGTERM (celld drains gracefully). Zero moving parts; no supervisor.
-- **docker** (`--docker` or `"backend": "docker"`): node runs as container `hive-<app>` from image `hive/celld:<version>`, published on `127.0.0.1:<port>`, `--restart unless-stopped`. `docker stop` is the same graceful drain.
+- **process** (default): `celld` as a detached process, logs to `.hive/node.log`, `down` = SIGTERM (celld drains gracefully). Zero moving parts; no supervisor — a reboot leaves the node down until the next `hive up`.
+- **docker** (`--docker` or `"backend": "docker"`): node runs as container `hive-<app>` from image `hive/celld:<version>` (built on demand from the official celld release binary), published on `127.0.0.1:<port>`, `--restart unless-stopped`, config drift detected by a label hash → recreate. `docker stop` is the same graceful drain.
+
+One node per fleet bucket prefix, ever. Two nodes on the same `s3://bucket/<app>` prefix produce `DurableObjectRoutingError: owner unreachable`.
 
 ## Remote operation
 
-Set `"server": "user@box"` in the hive block and commands proxy to the hive binary on the box over SSH (`ssh box hive <cmd> --local`). No RPC protocol; the same backends run there. `celld deploy` itself is bucket-direct from anywhere — only restart and health checks touch the box.
+Set `"server": "user@box"` in the hive block and commands proxy to the hive binary on the box over SSH (`ssh box hive <cmd> --local`). No RPC protocol; the same backends run there. `celld deploy` itself is bucket-direct from anywhere — only restart and health checks touch the box. `--local` forces local operation even when `server` is set.
 
-Bare box setup: docker, the hive binary, nothing else. Credentials sync over SSH as `~/.config/hive/<app>.env` (0600).
+Box setup: the hive binary at `~/.local/bin/hive`, celld alongside it, docker if wanted. Credentials sync over SSH as `~/.config/hive/<app>.env` (0600). Rebuild + scp the box's hive binary after hive upgrades or it runs stale code.
 
-CI: a stock GitHub-hosted runner runs `hive deploy`; it reaches the box via SSH through the Cloudflare Tunnel (`ssh.<domain>` ingress rule, `sshd` on loopback, cloudflared as ProxyCommand). Secrets: bucket creds, SSH key, tunnel token.
+CI: a stock GitHub-hosted runner runs `hive deploy`; it reaches the box via SSH through the Cloudflare Tunnel (`hive tunnel --ssh` adds the `ssh.<domain>` ingress rule; `sshd` bound to loopback, cloudflared as SSH ProxyCommand). Secrets: bucket creds, SSH key, tunnel token.
+
+## Environment variables
+
+| var | purpose |
+| --- | --- |
+| `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | S3 credentials (fed from the process env or `~/.config/hive/<app>.env`) |
+| `S3_ENDPOINT` / `AWS_REGION` | S3 endpoint / region (`auto` for R2) |
+| `CELLD_BUCKET` | Fleet bucket; nodes use `s3://<bucket>/<app>` |
+| `CLOUDFLARE_API_TOKEN` | Cloudflare auth source of truth — wins over the stored OAuth token |
+| `HIVE_CF_CLIENT_ID` | Override the compiled-in OAuth client ID |
+| `HIVE_LOGIN_PORT` | Override the OAuth callback port (tests only) |
 
 ## Security notes
 
-- Bucket credentials = full fleet control (deployments, cell replicas, ownership records). Keep them in env vars or `~/.config/hive/*.env` — never in the repo.
+- Bucket credentials = full fleet control (deployments, cell replicas, ownership records, node leases). Keep them in env vars or `~/.config/hive/*.env` — never in the repo.
 - celld's internal/operator listener is unauthenticated. It never leaves loopback; the public listener binds `127.0.0.1` behind your proxy/tunnel.
-- `CLOUDFLARE_API_TOKEN` in the environment wins over the stored OAuth token; `~/.config/hive/auth.json` is 0600 and refreshable.
+- Run nodes with `--trust-forwarded-headers` (hive does) so `request.url` keeps the public scheme/host.

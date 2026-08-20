@@ -48,7 +48,7 @@ Two files per app project, same directory:
 - `hive deploy` — typecheck (`tsc -b`) → `celld deploy` → restart the app's node → wait for `/__celld/health` ok. **The restart is the reload** — there is no watch mode or HMR; the loop is `edit → hive deploy → curl` and agents drive it.
 - `hive up` / `hive down` — start/stop the node for the current app. Two run backends behind one interface:
   - **process** (default): spawn `celld` detached, log to `.hive/node.log`, introspect port + `/__celld/health`, `down` = SIGTERM. Zero moving parts, but no supervisor — a reboot leaves the node down until the next `hive up`.
-  - **docker** (`--docker` or `"backend": "docker"` in the hive block): node runs as container `hive-<app>` from image `hive/celld:<version>` (built on demand from the official celld release binary on debian-slim), published on `127.0.0.1:<port>`, `--restart unless-stopped`, env via a generated 0600 `--env-file`, drift detected by a `hive.config` label hash → recreate. `docker stop` is the graceful SIGTERM drain. This is the box story — the remote box runs docker.
+  - **docker** (`--docker` or `"backend": "docker"` in the hive block): node runs as container `hive-<app>` from image `hive/celld:<version>` (built on demand from the official celld release binary on debian-slim), published on `127.0.0.1:<port>`, `--restart unless-stopped`, env via a generated 0600 `--env-file`, drift detected by a `hive.config` label hash → recreate. `docker stop` is the graceful SIGTERM drain. This is the box story — a server runs docker.
   `down` is SIGTERM either way — celld drains gracefully (health → 503, finishes in-flight, hands off cells). Idempotent: already-up is a no-op; config drift → restart. launchd/systemd backends were cut (git history has them); docker subsumes them.
 - Deployment targets = celld's targets: linux/amd64, linux/arm64, darwin/arm64 — bare box or docker. A bare box needs exactly two binaries (`hive`, `celld`) plus docker if the docker backend is wanted.
 - `hive status` — current app config + node state (running, pid, backend, health). `--json` is the primary interface. Live version from the bucket is shown only when cheap to read; otherwise "unknown".
@@ -74,7 +74,7 @@ Two files per app project, same directory:
 
 ## Cloudflare OAuth (`hive login`)
 
-- Default public client ID: `d6188eb87e7198f8f9fd8ef81abc6539`. Override with `HIVE_CF_CLIENT_ID`.
+- Default public client ID is compiled into login.go; override with `HIVE_CF_CLIENT_ID` (register your own self-managed OAuth client for production use).
 - Authorization endpoint: `https://dash.cloudflare.com/oauth2/auth`. Token endpoint: `https://dash.cloudflare.com/oauth2/token`.
 - Redirect URI: `http://127.0.0.1:8976/callback`. Port is hardcoded; override with `HIVE_LOGIN_PORT` only for tests.
 - Flow: OAuth 2.0 Authorization Code + PKCE (`S256`), token endpoint authentication method `none`, no client secret.
@@ -101,26 +101,30 @@ Two files per app project, same directory:
 - Typecheck: run `tsc -b` in the app directory; use `node_modules/.bin/tsc` if found (walking up from the app dir for monorepo layouts), else `tsc` on PATH. Skip with a note if no `tsconfig.json`.
 - Remote restart: when `hive.server` is set, `celld deploy` still runs locally (bucket-direct); only restart+health proxy over `ssh <server> hive down --local` then `ssh <server> hive up --local [--docker]`.
 
-## Test environments (live)
+## Test environments
 
-- **playground** at `~/Work/playground` — the hive playground monorepo (pnpm workspaces, `apps/*`). Has its own AGENTS.md. Bucket `mybucket` (default jurisdiction), per-app creds in `~/.config/hive/<app>.env` via `hive init`. Apps: `counter` (port 8101, domain counter.example.com, server user@box) and `wsecho` (port 8102). The old `old-bucket` bucket and `env.sh` are gone.
-- **remote box** — `user@box`, SSH key auth confirmed working, macOS 26.4.1 arm64. hive + celld binaries at `~/.local/bin` (rebuild with `CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build` + scp when hive changes). **Process backend verified E2E**: `hive deploy` from the laptop syncs `~/.config/hive/counter.env`, restarts the mini's node over ssh, health-gates, and the app serves on `127.0.0.1:8101` (verified with a remote curl). **Gotcha:** only ONE node per fleet bucket prefix may run — a local node and the mini node on `mybucket/counter` simultaneously produced `DurableObjectRoutingError: owner unreachable` (the mini routed to the unreachable local lease holder). `hive down --local` before testing remote. No docker installed (docker backend untested there; install pending user's call). Non-login ssh PATH lacks `brew`/`docker` — hive's proxied commands work because `~/.local/bin` is on it, but anything Homebrew-installed needs `zsh -lc` or absolute paths.
-- Cloudflare: OAuth client `d6188eb87e7198f8f9fd8ef81abc6539` on account `00000000000000000000000000000000`. The `hive` tunnel (id `00000000-0000-0000-0000-000000000000`) and `counter.example.com` DNS record exist and are verified live end-to-end (public curl → tunnel → mini node). Connector on the mini: brew `cloudflared`, installed as a **user** LaunchAgent (`com.cloudflare.cloudflared`, token file under `~/Library/Application Support/com.cloudflare.cloudflared/`) — runs only while the user is logged in, and over ssh it needs a `launchctl kickstart gui/<uid>/com.cloudflare.cloudflared` the first time. The mini runs other unrelated tunnels — NEVER `pkill cloudflared`.
+Live infrastructure details (playground repo, remote box, Cloudflare account/tunnel IDs) are kept in `AGENTS.local.md`, which is gitignored — never commit them. Key operational lessons that apply anywhere:
+
+- celld verified at v0.2.1; install at `~/.local/bin/celld`.
+- **Only ONE node per fleet bucket prefix may run.** Two nodes on the same `s3://bucket/<app>` prefix produce `DurableObjectRoutingError: owner unreachable` (the new node routes to the unreachable lease holder). `hive down --local` before testing remote.
+- On macOS boxes, non-login ssh PATH lacks Homebrew (`brew`, `docker`) — hive's proxied commands work when the binary is at `~/.local/bin/hive`; anything Homebrew-installed needs `zsh -lc` or absolute paths.
+- A remote box needs its hive binary refreshed after hive changes (`CGO_ENABLED=0 GOOS=<goos> GOARCH=<goarch> go build` + scp) or it runs stale code.
+- On macOS, `cloudflared service install <token>` (non-root) creates a **user** LaunchAgent that runs only while the user is logged in, and over ssh needs a `launchctl kickstart gui/<uid>/com.cloudflare.cloudflared` the first time.
 
 ## Current state
 
-`add`, `up`/`down`, `deploy`, `check`, `login`, `tunnel`, and `init` are implemented and verified live: `add`–`deploy` dogfooded against `playground/apps/counter`, `login`/`tunnel` against the real Cloudflare account, `init` via the paste path (bucket `mybucket`, deploy to it proven from the 0600 env file alone — no sourced env). `ui` is a stub (parked by user). Builds clean: `go vet ./... && CGO_ENABLED=0 go build `.
+`add`, `up`/`down`, `deploy`, `check`, `login`, `tunnel`, `init`, and `ui` are implemented and verified live: `add`–`deploy` dogfooded against a playground monorepo app, `login`/`tunnel` against a real Cloudflare account, `init` via the paste path (deploy to the bucket proven from the 0600 env file alone — no sourced env), `ui` reviewed in a real browser (playwright screenshot). Builds clean: `go vet ./... && CGO_ENABLED=0 go build `.
 
 ## Build order (next steps, in order)
 
 1. `add` — template scaffolding + port allocation (dogfood by converting playground apps to hive projects).
 2. `up`/`down` local backend — ✅ process backend done; launchd/systemd code written.
-3. `deploy` — ✅ tsc → celld deploy → restart → health gate. Dogfooded end-to-end against `counter`.
+3. `deploy` — ✅ tsc → celld deploy → restart → health gate. Dogfooded end-to-end, local and over ssh to a remote box.
 4. `check` — ✅ celld-legal key list validation + deploy-path dry-run.
 5. launchd/systemd backends — CUT; docker subsumes them. Docker backend verified locally; on the remote box pending a docker install.
-6. `tunnel` — ✅ REST-driven remotely-managed tunnel, verified live (create/configure/DNS/teardown). Connector install on the remote box via `cloudflared service install`.
+6. `tunnel` — ✅ REST-driven remotely-managed tunnel, verified live (create/configure/DNS/teardown). Connector install on the box via `cloudflared service install`.
 7. `init` — ✅ provider-agnostic cred chain: `--access-key/--secret-key/--endpoint` flags (zero CF calls) → reuse from a sibling app's env file with matching `CELLD_BUCKET` → CF mint (needs `CLOUDFLARE_API_TOKEN` with API Tokens Edit) → deep-link paste fallback. Paste path verified live.
-8. `ui` — local SPA served from the binary via embed.FS; zero own logic, pure skin over `status --json`. Parked by user.
+8. `ui` — ✅ local SPA served from the binary via embed.FS; read-only skin over `gatherStatus` + `.hive/node.log` tail, 2s polling, opencode-style dark terminal aesthetic. `--port` (default 8977), `--no-browser`.
 
 ## Conventions
 
