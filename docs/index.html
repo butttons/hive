@@ -237,7 +237,7 @@ footer {
       <li>A box to run nodes on: Linux (amd64/arm64) or macOS (arm64). Docker on the box if you want the supervised backend.</li>
       <li><a href="https://celld.dev/docs">celld</a> installed wherever you deploy <em>from</em> (<code>curl -fsSL https://celld.dev/install.sh | sh</code>), plus <code>esbuild</code> on PATH for deploys.</li>
     </ul>
-    <p>Cloudflare is optional: <code>login</code>/<code>init</code>/<code>tunnel</code> automate R2 + Tunnel + DNS, but any S3 credentials and any reverse proxy (caddy, nginx, your own tunnel) work just as well.</p>
+    <p>Cloudflare is optional: <code>cf login</code>/<code>init</code>/<code>cf tunnel</code> automate R2 + Tunnel + DNS, but any S3 credentials and any reverse proxy (caddy, nginx, your own tunnel) work just as well.</p>
   </section>
 
   <section id="build">
@@ -258,7 +258,6 @@ cd myapp
 # S3_ENDPOINT / AWS_REGION / CELLD_BUCKET yourself, or provision with:
 hive init --bucket mybucket --access-key ... --secret-key ... --endpoint ...
 
-hive check                # will this deploy to celld?
 hive deploy               # tsc → celld deploy → restart node → health gate
 curl http://127.0.0.1:&lt;port&gt;/</code></pre>
     <p>There is no watch mode or HMR — the restart is the reload. The loop is <code>edit → hive deploy → curl</code>.</p>
@@ -277,6 +276,17 @@ curl http://127.0.0.1:&lt;port&gt;/</code></pre>
     <p><code>port</code> is required. <code>domain</code>, <code>server</code>, <code>backend</code> are optional (local-only apps skip them).</p>
   </section>
 
+  <section id="monorepos">
+    <h2>Monorepos</h2>
+    <p>Run <code>hive</code> from a workspace root to operate on the whole fleet. Discovery order:</p>
+    <ol>
+      <li><code>pnpm-workspace.yml</code> / <code>pnpm-workspace.yaml</code> <code>packages:</code> globs.</li>
+      <li>Root <code>package.json</code> <code>workspaces</code> field (array or <code>{"packages":["..."]}</code> object).</li>
+    </ol>
+    <p>A directory counts as a hive app only if its <code>package.json</code> contains a <code>"hive"</code> block. Patterns support a single trailing <code>/*</code> (e.g. <code>apps/*</code>).</p>
+    <p><code>hive status</code> and <code>hive ui</code> show fleet views from a workspace root and single-app views from an app dir. <code>hive deploy all</code> deploys every app sequentially, continuing past failures. <code>--filter &lt;name&gt;</code> matches the app's <code>package.json</code> <code>name</code> or directory basename and operates on one app even from the root. If no workspace file exists, <code>--packages &lt;glob&gt;</code> enumerates apps manually.</p>
+  </section>
+
   <section id="commands">
     <h2>Commands</h2>
     <p>Every command takes <code>--json</code> and prints machine-readable output. Agents are the primary user.</p>
@@ -285,14 +295,14 @@ curl http://127.0.0.1:&lt;port&gt;/</code></pre>
         <thead><tr><th>command</th><th>flags</th><th>what it does</th></tr></thead>
         <tbody>
           <tr><td><code>hive add &lt;name&gt;</code></td><td><code>--port</code>, <code>--force</code></td><td>Scaffold a new app (wrangler.jsonc + index.ts + tsconfig + package.json), allocate a free port</td></tr>
-          <tr><td><code>hive check</code></td><td></td><td>Validate wrangler.jsonc against the celld-legal key list, dry-run the deploy path. Deliberately dumb — celld fails loud, hive relays</td></tr>
           <tr><td><code>hive deploy</code></td><td><code>--docker</code>, <code>--local</code></td><td>Typecheck (<code>tsc -b</code>) → <code>celld deploy</code> → restart the node → wait for <code>/__celld/health</code> (30s gate). Prints the version ID</td></tr>
+          <tr><td><code>hive deploy all</code></td><td><code>--docker</code>, <code>--local</code>, <code>--packages</code></td><td>Deploy every workspace app sequentially, continuing past failures</td></tr>
           <tr><td><code>hive up</code></td><td><code>--docker</code>, <code>--local</code></td><td>Start the node. Idempotent; config drift → restart</td></tr>
           <tr><td><code>hive down</code></td><td><code>--local</code></td><td>Stop the node gracefully (SIGTERM; celld drains in-flight work)</td></tr>
-          <tr><td><code>hive status</code></td><td><code>--local</code></td><td>App config + node state (running, pid, backend, health)</td></tr>
+          <tr><td><code>hive status</code></td><td><code>--local</code>, <code>--filter</code></td><td>App config + node state; from a workspace root, show a compact fleet table</td></tr>
           <tr><td><code>hive init</code></td><td><code>--bucket</code>, <code>--access-key</code>, <code>--secret-key</code>, <code>--endpoint</code>, <code>--region</code>, <code>--jurisdiction</code>, <code>--force</code></td><td>Provision bucket credentials into <code>~/.config/hive/&lt;app&gt;.env</code> (0600)</td></tr>
-          <tr><td><code>hive login</code></td><td><code>--status</code>, <code>--export</code>, <code>--no-browser</code></td><td>Cloudflare OAuth consent (PKCE); stores a refreshable token</td></tr>
-          <tr><td><code>hive tunnel</code></td><td><code>--name</code>, <code>--ssh</code></td><td>Create/sync a remotely-managed Cloudflare Tunnel: ingress rules + DNS, prints the box install command</td></tr>
+          <tr><td><code>hive cf login</code></td><td><code>--status</code>, <code>--export</code>, <code>--no-browser</code></td><td>Cloudflare OAuth consent (PKCE); stores a refreshable token</td></tr>
+          <tr><td><code>hive cf tunnel</code></td><td><code>--name</code>, <code>--ssh</code></td><td>Create/sync a remotely-managed Cloudflare Tunnel: ingress rules + DNS, prints the box install command</td></tr>
         </tbody>
       </table>
     </div>
@@ -306,7 +316,7 @@ curl http://127.0.0.1:&lt;port&gt;/</code></pre>
       <li>Otherwise: a deep link to the R2 S3-keys page; paste the pair with <code>--access-key</code>/<code>--secret-key</code>.</li>
     </ol>
 
-    <h3><code>hive login</code></h3>
+    <h3><code>hive cf login</code></h3>
     <p>Self-managed Cloudflare OAuth (authorization code + PKCE, no client secret). Default public client ID is compiled in; override with <code>HIVE_CF_CLIENT_ID</code> (register your own client for production use). Scopes: <code>argotunnel.write</code> <code>dns.write</code> <code>zone.read</code> <code>workers-r2.write</code>. Tokens live at <code>~/.config/hive/auth.json</code> (0600) and refresh automatically. <code>--export</code> prints <code>export CLOUDFLARE_API_TOKEN=…</code> instead of saving.</p>
   </section>
 
@@ -326,7 +336,7 @@ curl http://127.0.0.1:&lt;port&gt;/</code></pre>
     <h2>Remote operation</h2>
     <p>Set <code>"server": "user@box"</code> in the hive block and commands proxy to the hive binary on the box over SSH (<code>ssh box hive &lt;cmd&gt; --local</code>). No RPC protocol; the same backends run there. <code>celld deploy</code> itself is bucket-direct from anywhere — only restart and health checks touch the box. <code>--local</code> forces local operation even when <code>server</code> is set.</p>
     <p>Box setup: the hive binary at <code>~/.local/bin/hive</code>, celld alongside it, docker if wanted. Credentials sync over SSH as <code>~/.config/hive/&lt;app&gt;.env</code> (0600). Rebuild + scp the box's hive binary after hive upgrades or it runs stale code.</p>
-    <p>CI: a stock GitHub-hosted runner runs <code>hive deploy</code>; it reaches the box via SSH through the Cloudflare Tunnel (<code>hive tunnel --ssh</code> adds the <code>ssh.&lt;domain&gt;</code> ingress rule; <code>sshd</code> bound to loopback, cloudflared as SSH ProxyCommand). Secrets: bucket creds, SSH key, tunnel token.</p>
+    <p>CI: a stock GitHub-hosted runner runs <code>hive deploy</code>; it reaches the box via SSH through the Cloudflare Tunnel (<code>hive cf tunnel --ssh</code> adds the <code>ssh.&lt;domain&gt;</code> ingress rule; <code>sshd</code> bound to loopback, cloudflared as SSH ProxyCommand). Secrets: bucket creds, SSH key, tunnel token.</p>
   </section>
 
   <section id="env">

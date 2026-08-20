@@ -26,7 +26,7 @@ Cross-compiles to `linux/amd64`, `linux/arm64`, `darwin/arm64`. Requires [celld]
 - S3-compatible bucket with conditional writes + read-after-write consistency. R2, AWS S3, and Tigris qualify; B2/MinIO/Spaces do not.
 - Box to run nodes: Linux (amd64/arm64) or macOS (arm64).
 - Docker on the box for the supervised `docker` backend.
-- Cloudflare is optional: `login`/`init`/`tunnel` automate R2 + Tunnel + DNS, but any S3 credentials and any reverse proxy work.
+- Cloudflare is optional: `cf login`/`init`/`cf tunnel` automate R2 + Tunnel + DNS, but any S3 credentials and any reverse proxy work.
 
 ## Quickstart
 
@@ -40,7 +40,6 @@ export AWS_ACCESS_KEY_ID=... AWS_SECRET_ACCESS_KEY=... S3_ENDPOINT=... AWS_REGIO
 # Option B: provision via hive init
 hive init --bucket mybucket --access-key ... --secret-key ... --endpoint ...
 
-hive check                # validate wrangler.jsonc, dry-run deploy
 hive deploy               # tsc -b → celld deploy → restart → /__celld/health gate
 curl http://127.0.0.1:<port>/
 ```
@@ -62,6 +61,15 @@ Two files per app, same directory:
 
 `port` is required. `domain`, `server`, `backend` are optional.
 
+## Monorepos
+
+Run `hive` from a workspace root to operate on the whole fleet. Discovery order: `pnpm-workspace.yml`/`pnpm-workspace.yaml` `packages:` globs first, then root `package.json` `workspaces` (array or `{"packages":[...]}` object). A directory is a hive app only if its `package.json` contains a `"hive"` block. Patterns support a single trailing `/*` (e.g. `apps/*`).
+
+- `hive status` / `hive ui` show fleet views from a workspace root and single-app views from an app dir.
+- `hive deploy all` deploys every app sequentially, continuing past failures.
+- `hive deploy --filter <name>` / `hive status --filter <name>` operate on one app; the filter matches `package.json` `name` or the directory basename.
+- `--packages <glob>` (repeatable or comma-separated) enumerates apps manually when no workspace file exists.
+
 ## Command reference
 
 Every command takes `--json`.
@@ -69,14 +77,14 @@ Every command takes `--json`.
 | command | flags | description |
 | --- | --- | --- |
 | `hive add <name>` | `--port`, `--force` | Scaffold a new app (wrangler.jsonc + index.ts + tsconfig + package.json) and allocate a free port. |
-| `hive check` | | Validate `wrangler.jsonc` against the celld-legal key list; dry-run deploy path. |
 | `hive deploy` | `--docker`, `--local` | `tsc -b` → `celld deploy` → restart node → 30s health gate. Prints version ID. |
+| `hive deploy all` | `--docker`, `--local`, `--packages` | Deploy every workspace app sequentially, continuing past failures. |
 | `hive up` | `--docker`, `--local` | Start the node. Idempotent; config drift restarts. |
 | `hive down` | `--local` | Stop node gracefully via SIGTERM; celld drains in-flight work. |
-| `hive status` | `--local` | App config + node state (running, pid, backend, health). |
+| `hive status` | `--local`, `--filter` | App config + node state; from a workspace root, show a compact fleet table. |
 | `hive init` | `--bucket`, `--access-key`, `--secret-key`, `--endpoint`, `--region`, `--jurisdiction`, `--force` | Provision bucket credentials into `~/.config/hive/<app>.env` (0600). |
-| `hive login` | `--status`, `--export`, `--no-browser` | Cloudflare OAuth consent (PKCE); stores refreshable token. |
-| `hive tunnel` | `--name`, `--ssh` | Create/sync remotely-managed Cloudflare Tunnel: ingress rules + DNS; prints box install command. |
+| `hive cf login` | `--status`, `--export`, `--no-browser` | Cloudflare OAuth consent (PKCE); stores refreshable token. |
+| `hive cf tunnel` | `--name`, `--ssh` | Create/sync remotely-managed Cloudflare Tunnel: ingress rules + DNS; prints box install command. |
 
 ### `hive init` credential chain (first match wins)
 
@@ -85,7 +93,7 @@ Every command takes `--json`.
 3. Cloudflare path: bucket create + S3 key mint. Requires `CLOUDFLARE_API_TOKEN` with **API Tokens Edit**; OAuth tokens cannot mint keys because Cloudflare's self-managed OAuth catalog lacks an API Tokens scope.
 4. Fallback: deep link to R2 S3-keys page; paste pair via `--access-key`/`--secret-key`.
 
-### `hive login`
+### `hive cf login`
 
 Self-managed Cloudflare OAuth (authorization code + PKCE, no client secret). Default public client ID compiled in; override with `HIVE_CF_CLIENT_ID`. Scopes: `argotunnel.write`, `dns.write`, `zone.read`, `workers-r2.write`. Token stored at `~/.config/hive/auth.json` (0600), refreshes automatically. `--export` prints `export CLOUDFLARE_API_TOKEN=...` instead of saving.
 
@@ -102,7 +110,7 @@ Set `"server": "user@box"` in the hive block. Commands proxy over SSH as `ssh bo
 
 Box needs `hive` and `celld` at `~/.local/bin/`, docker if used. Credentials sync as `~/.config/hive/<app>.env`. Rebuild and scp the box's hive binary after upgrades.
 
-CI: GitHub-hosted runner runs `hive deploy`, reaches box via SSH through Cloudflare Tunnel (`hive tunnel --ssh` adds `ssh.<domain>` ingress; `sshd` bound to loopback; cloudflared as ProxyCommand). Secrets: bucket creds, SSH key, tunnel token.
+CI: GitHub-hosted runner runs `hive deploy`, reaches box via SSH through Cloudflare Tunnel (`hive cf tunnel --ssh` adds `ssh.<domain>` ingress; `sshd` bound to loopback; cloudflared as ProxyCommand). Secrets: bucket creds, SSH key, tunnel token.
 
 ## Environment variables
 

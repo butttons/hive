@@ -30,17 +30,28 @@ Two files per app project, same directory:
 
 `port` is required; `domain`, `server`, `backend` optional. Loaded by `registry.go`.
 
+## Monorepo model (settled)
+
+- Workspace discovery from cwd: `pnpm-workspace.yml`/`pnpm-workspace.yaml` `packages:` globs first, then root `package.json` `workspaces` (array or `{packages:[...]}` object). Walk up until a workspace file is found or the git root/filesystem root stops the search.
+- A directory counts as a hive app iff its `package.json` contains a `"hive"` block. Glob expansion is minimal stdlib-only: single trailing `/*` (e.g. `apps/*`, `packages/*`); `**` not required.
+- Fallback `--packages <glob>` (repeatable or comma-separated) when no workspace file exists.
+- `hive deploy all` from a workspace root deploys every app sequentially, continues past failures, prints a per-app summary, exits non-zero if any failed. `--json` returns an array of per-app deploy results (same fields as single deploy, including `version`).
+- `hive deploy` bare at a non-app root errors, telling the user to use `hive deploy all`, `--filter`, or cd into an app.
+- `--filter <name>` on `deploy`/`status` matches app `package.json` `name` or directory basename; errors listing available apps if no match. With `--filter`, a single app deploys even from the root.
+- `hive status` at a workspace root prints a compact fleet table (name, port, server/backend, node up/down, health, version). `hive ui` at a root shows a fleet view. Both honor `--filter` and keep single-app behavior when cwd is an app dir.
+- `login` and `tunnel` moved under `hive cf`. Top-level `check` removed.
+
 ## Remote model (settled)
 
 - `hive.server` is an **SSH host**. Unset = operate locally. Set = the CLI proxies to the hive binary on the box: `ssh <server> ~/.local/bin/hive <cmd> --local`. No RPC protocol; `--local` forces local.
 - `celld deploy` is bucket-direct from anywhere; only restart + health checks touch the box.
-- CI = stock GitHub-hosted runner running `hive deploy`, reaching the box via SSH through the Cloudflare Tunnel (`hive tunnel --ssh` adds the `ssh.<domain>` ingress rule; `sshd` loopback-only, cloudflared as ProxyCommand). Secrets: bucket creds, SSH key, tunnel token.
+- CI = stock GitHub-hosted runner running `hive deploy`, reaching the box via SSH through the Cloudflare Tunnel (`hive cf tunnel --ssh` adds the `ssh.<domain>` ingress rule; `sshd` loopback-only, cloudflared as ProxyCommand). Secrets: bucket creds, SSH key, tunnel token.
 
 ## Commands and backends
 
 All implemented and verified live. User-facing reference: README.md / hive.butttons.dev.
 
-- `add` `check` `deploy` `up` `down` `status` `init` `login` `tunnel` `ui`.
+- `add` `deploy` `up` `down` `status` `init` `cf` `ui`.
 - `deploy` = typecheck (`tsc -b`) → `celld deploy` → restart node → 30s `/__celld/health` gate. **The restart is the reload** — no watch mode or HMR.
 - Backends behind one interface; `down` is SIGTERM either way (celld drains gracefully). Idempotent; config drift → restart.
   - **process** (default): `celld` detached, log `.hive/node.log`. No supervisor — a reboot leaves the node down.
@@ -50,13 +61,13 @@ All implemented and verified live. User-facing reference: README.md / hive.buttt
 ## Provider model (settled)
 
 - **Provider-agnostic core.** Hard requirements: S3 credentials (`AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`/`S3_ENDPOINT`/`AWS_REGION`/`CELLD_BUCKET`) + an SSH-reachable box. Everything works with exactly that.
-- **Cloudflare is optional convenience**: `login` (OAuth), `init` (R2 provisioning), `tunnel` (ingress). Without Cloudflare, users set the env vars and terminate TLS however they want — hive prescribes no ingress.
+- **Cloudflare is optional convenience**: `cf login` (OAuth), `init` (R2 provisioning), `cf tunnel` (ingress). Without Cloudflare, users set the env vars and terminate TLS however they want — hive prescribes no ingress.
 - **Env vars win.** `CLOUDFLARE_API_TOKEN` beats `~/.config/hive/auth.json`; per-app `~/.config/hive/<app>.env` (0600) feeds celld. All credential files are 0600 and never committed.
 - `init` cred chain: `--access-key/--secret-key/--endpoint` flags (zero CF calls) → reuse from a sibling app's env file (matching `CELLD_BUCKET`) → CF mint → deep-link paste fallback.
 
 ## Cloudflare specifics
 
-- OAuth (`hive login`): authorization code + PKCE (S256), auth method `none`, redirect `http://127.0.0.1:8976/callback` (override `HIVE_LOGIN_PORT` for tests). Scopes: `argotunnel.write dns.write zone.read workers-r2.write`. `account.read` is NOT allowlistable on self-managed clients (consent fails `invalid_scope`); zone listing covers account discovery. Default client ID compiled into login.go; override `HIVE_CF_CLIENT_ID`.
+- OAuth (`hive cf login`): authorization code + PKCE (S256), auth method `none`, redirect `http://127.0.0.1:8976/callback` (override `HIVE_LOGIN_PORT` for tests). Scopes: `argotunnel.write dns.write zone.read workers-r2.write`. `account.read` is NOT allowlistable on self-managed clients (consent fails `invalid_scope`); zone listing covers account discovery. Default client ID compiled into login.go; override `HIVE_CF_CLIENT_ID`.
 - R2 S3 keys ARE mintable via REST (user API token with `Workers R2 Storage Bucket Item Write`; key id = token `id`, secret = SHA-256 hex of token `value`) but NOT with an OAuth token — no API Tokens scope in the OAuth catalog. So mint needs `CLOUDFLARE_API_TOKEN` with API Tokens Edit; OAuth users get the paste path.
 - Tunnel ingress: remotely-managed via REST (`PUT /cfd_tunnel/<id>/configurations`, DNS via API). The box gets only a tunnel token: `cloudflared service install <token>`. Zero inbound ports; celld's public listener stays on 127.0.0.1; the operator listener is unauthenticated — never expose it. Nodes run with `--trust-forwarded-headers`.
 - Do NOT build on the `cf` CLI — technical preview, subset coverage. Call the REST API directly.
