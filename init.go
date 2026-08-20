@@ -164,7 +164,7 @@ func appEnvDir() string {
 }
 
 func cmdInit(ctx context.Context, args []string) error {
-	args = normalizeFlags(args, map[string]bool{})
+	args = normalizeFlags(args, map[string]bool{"bucket": true, "jurisdiction": true, "access-key": true, "secret-key": true})
 	fs := flag.NewFlagSet("init", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	jsonFlag := fs.Bool("json", false, "")

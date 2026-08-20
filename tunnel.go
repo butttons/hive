@@ -265,7 +265,7 @@ func upsertTunnelCNAME(ctx context.Context, zoneID, hostname, tunnelID string) (
 }
 
 func cmdTunnel(ctx context.Context, args []string) error {
-	args = normalizeFlags(args, map[string]bool{})
+	args = normalizeFlags(args, map[string]bool{"name": true})
 	fs := flag.NewFlagSet("tunnel", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	jsonFlag := fs.Bool("json", false, "")

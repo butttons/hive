@@ -108,7 +108,7 @@ Two files per app project, same directory:
 
 ## Current state
 
-`add`, `up`/`down`, `deploy`, `check`, `login`, and `tunnel` are implemented; `add` through `deploy` are dogfooded against `playground/apps/counter`, `login` and `tunnel` verified against the live Cloudflare account. `init` is implemented but its token-minting path is blocked on the API Tokens OAuth scope (bucket creation verified; `mybucket` exists). `ui` is still a stub. Builds clean: `go vet ./... && CGO_ENABLED=0 go build `.
+`add`, `up`/`down`, `deploy`, `check`, `login`, `tunnel`, and `init` are implemented and verified live: `add`–`deploy` dogfooded against `playground/apps/counter`, `login`/`tunnel` against the real Cloudflare account, `init` via the paste path (bucket `mybucket`, deploy to it proven from the 0600 env file alone — no sourced env). `ui` is a stub (parked by user). Builds clean: `go vet ./... && CGO_ENABLED=0 go build `.
 
 ## Build order (next steps, in order)
 
