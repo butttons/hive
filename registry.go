@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // HiveConfig is the "hive" block in the app's package.json. It holds
@@ -14,6 +15,7 @@ type HiveConfig struct {
 	Domain  string `json:"domain,omitempty"`
 	Server  string `json:"server,omitempty"`  // ssh host for the run backend
 	Backend string `json:"backend,omitempty"` // "docker" for a container node; default is a plain process
+	Dir     string `json:"dir,omitempty"`     // absolute path of the app directory on the server
 }
 
 // App is one deployable celld project: a wrangler.jsonc plus a "hive" block
@@ -53,6 +55,9 @@ func LoadApp(dir string) (*App, error) {
 	}
 	if pkg.Hive.Port == 0 {
 		return nil, fmt.Errorf("%s: missing \"hive\".\"port\"", pkgPath)
+	}
+	if pkg.Hive.Dir != "" && !strings.HasPrefix(pkg.Hive.Dir, "/") {
+		return nil, fmt.Errorf("%s: hive.dir must be an absolute path, got %q", pkgPath, pkg.Hive.Dir)
 	}
 
 	return &App{Dir: dir, Name: wrangler.Name, Hive: pkg.Hive}, nil

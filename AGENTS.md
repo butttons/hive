@@ -44,7 +44,8 @@ Two files per app project, same directory:
 ## Remote model (settled)
 
 - `hive.server` is an **SSH host**. Unset = operate locally. Set = the CLI proxies to the hive binary on the box: `ssh <server> ~/.local/bin/hive <cmd> --local`. No RPC protocol; `--local` forces local.
-- `celld deploy` is bucket-direct from anywhere; only restart + health checks touch the box.
+- `hive.dir` is the absolute app directory on the server. When empty, the local `app.Dir` is sent verbatim (works when the box shares the filesystem layout, e.g. the mac mini). When set, it must start with `/` (no tilde expansion). `down` and `status` use it as the remote cwd.
+- On `deploy`/`up`, after syncing `~/.config/hive/<app>.env`, hive also `mkdir -p <dir>` and `scp package.json wrangler.jsonc` to `<dir>` before issuing the remote command. `celld deploy` is bucket-direct from anywhere; only restart + health checks touch the box.
 - CI = stock GitHub-hosted runner running `hive deploy`, reaching the box via SSH through the Cloudflare Tunnel (`hive cf tunnel --ssh` adds the `ssh.<domain>` ingress rule; `sshd` loopback-only, cloudflared as ProxyCommand). Secrets: bucket creds, SSH key, tunnel token.
 
 ## Commands and backends

@@ -271,9 +271,9 @@ curl http://127.0.0.1:&lt;port&gt;/</code></pre>
       <li><code>package.json</code> — a <code>"hive"</code> block for everything celld rejects:</li>
     </ul>
     <pre><code>{
-  "hive": { "port": 8101, "domain": "app.example.com", "server": "user@box", "backend": "docker" }
+  "hive": { "port": 8101, "domain": "app.example.com", "server": "user@box", "dir": "/opt/apps/myapp", "backend": "docker" }
 }</code></pre>
-    <p><code>port</code> is required. <code>domain</code>, <code>server</code>, <code>backend</code> are optional (local-only apps skip them).</p>
+    <p><code>port</code> is required. <code>domain</code>, <code>server</code>, <code>dir</code>, <code>backend</code> are optional (local-only apps skip them). When <code>server</code> is set, <code>dir</code> is the absolute path of the app directory on the server; if omitted, the local path is used verbatim, which only works when the box shares the same filesystem layout.</p>
   </section>
 
   <section id="monorepos">
@@ -335,6 +335,7 @@ curl http://127.0.0.1:&lt;port&gt;/</code></pre>
   <section id="remote">
     <h2>Remote operation</h2>
     <p>Set <code>"server": "user@box"</code> in the hive block and commands proxy to the hive binary on the box over SSH (<code>ssh box hive &lt;cmd&gt; --local</code>). No RPC protocol; the same backends run there. <code>celld deploy</code> itself is bucket-direct from anywhere — only restart and health checks touch the box. <code>--local</code> forces local operation even when <code>server</code> is set.</p>
+    <p>When the server's app directory differs from the local one, set <code>"dir": "/absolute/path/on/server"</code> in the hive block. It must be absolute (no <code>~</code>). On <code>deploy</code>/<code>up</code>, hive creates the directory and syncs <code>package.json</code> + <code>wrangler.jsonc</code> there before running the remote command. <code>down</code> and <code>status</code> also use <code>dir</code> when set.</p>
     <p>Box setup: the hive binary at <code>~/.local/bin/hive</code>, celld alongside it, docker if wanted. Credentials sync over SSH as <code>~/.config/hive/&lt;app&gt;.env</code> (0600). Rebuild + scp the box's hive binary after hive upgrades or it runs stale code.</p>
     <p>CI: a stock GitHub-hosted runner runs <code>hive deploy</code>; it reaches the box via SSH through the Cloudflare Tunnel (<code>hive cf tunnel --ssh</code> adds the <code>ssh.&lt;domain&gt;</code> ingress rule; <code>sshd</code> bound to loopback, cloudflared as SSH ProxyCommand). Secrets: bucket creds, SSH key, tunnel token.</p>
   </section>

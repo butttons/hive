@@ -174,14 +174,60 @@ func runDeploy(ctx context.Context, app *App, dockerFlag, localFlag, jsonFlag bo
 	st = startStep("health")
 	healthCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	if ok, msg := waitForHealth(healthCtx, app); !ok {
-		logPath := filepath.Join(app.Dir, ".hive", "node.log")
+	var ok bool
+	var msg string
+	var logDir string
+	if app.Hive.Server != "" && !localFlag {
+		ok, msg = waitForRemoteHealth(healthCtx, app.Hive.Server, app)
+		logDir, _ = remoteAppDir(app)
+	} else {
+		ok, msg = waitForHealth(healthCtx, app)
+		logDir = app.Dir
+	}
+	if !ok {
+		logPath := filepath.Join(logDir, ".hive", "node.log")
 		steps = append(steps, st.done(false))
 		return deployResult{App: app.Name, Version: version, Steps: steps, DurationMs: time.Since(start).Milliseconds(), Error: fmt.Sprintf("health gate timed out after 30s (see %s): %s", logPath, msg)}
 	}
 	steps = append(steps, st.done(true))
 
 	return deployResult{App: app.Name, Version: version, Steps: steps, DurationMs: time.Since(start).Milliseconds()}
+}
+
+func waitForRemoteHealth(ctx context.Context, server string, app *App) (bool, string) {
+	deadline, ok := ctx.Deadline()
+	if !ok {
+		deadline = time.Now().Add(15 * time.Second)
+	}
+	url := fmt.Sprintf("http://127.0.0.1:%d/__celld/health", app.Hive.Port)
+	script := "curl -fsS " + shellSingleQuote(url)
+	for time.Now().Before(deadline) {
+		cmd := exec.CommandContext(ctx, "ssh", server, script)
+		out, err := cmd.CombinedOutput()
+		if err == nil && healthBodyOK(out) {
+			return true, ""
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	cmd := exec.CommandContext(ctx, "ssh", server, script)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return false, strings.TrimSpace(string(out))
+	}
+	if healthBodyOK(out) {
+		return true, ""
+	}
+	return false, strings.TrimSpace(string(out))
+}
+
+func healthBodyOK(body []byte) bool {
+	var v struct {
+		OK bool `json:"ok"`
+	}
+	if err := json.Unmarshal(body, &v); err != nil {
+		return false
+	}
+	return v.OK
 }
 
 
@@ -200,7 +246,46 @@ func loadCwdApp() (*App, error) {
 	return app, nil
 }
 
-func remoteHive(server, dir, cmd string, args []string) error {
+// remoteAppDir returns the directory to use on the remote server. If the hive
+// block sets an explicit dir, it must be absolute.
+func remoteAppDir(app *App) (string, error) {
+	if app.Hive.Dir != "" {
+		if !strings.HasPrefix(app.Hive.Dir, "/") {
+			return "", fmt.Errorf("hive.dir must be an absolute path, got %q", app.Hive.Dir)
+		}
+		return app.Hive.Dir, nil
+	}
+	return app.Dir, nil
+}
+
+// syncAppFiles copies package.json and wrangler.jsonc to the remote app
+// directory when hive.dir is set. It is a no-op when dir is empty, preserving
+// backwards compatibility with boxes that share the local filesystem layout.
+func syncAppFiles(server string, app *App) error {
+	dir := app.Hive.Dir
+	if dir == "" {
+		return nil
+	}
+	mkdir := exec.Command("ssh", server, "mkdir -p "+shellSingleQuote(dir))
+	if out, err := mkdir.CombinedOutput(); err != nil {
+		return fmt.Errorf("mkdir %s on %s: %s: %w", dir, server, strings.TrimSpace(string(out)), err)
+	}
+	for _, name := range []string{"package.json", "wrangler.jsonc"} {
+		src := filepath.Join(app.Dir, name)
+		dst := server + ":" + filepath.Join(dir, name)
+		cmd := exec.Command("scp", src, dst)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			return fmt.Errorf("scp %s to %s: %s: %w", src, dst, strings.TrimSpace(string(out)), err)
+		}
+	}
+	return nil
+}
+
+func remoteHive(server string, app *App, cmd string, args []string) error {
+	dir, err := remoteAppDir(app)
+	if err != nil {
+		return err
+	}
 	remoteCmd := fmt.Sprintf("cd %s && ~/.local/bin/hive %s", shellSingleQuote(dir), shellJoin(append([]string{cmd}, args...)))
 	c := exec.Command("ssh", server, remoteCmd)
 	c.Stdin = os.Stdin
@@ -252,7 +337,10 @@ func cmdUp(ctx context.Context, args []string) error {
 			remoteArgs = append(remoteArgs, "--docker")
 		}
 		remoteArgs = append(remoteArgs, "--local")
-		return remoteHive(app.Hive.Server, app.Dir, "up", remoteArgs)
+		if err := syncAppFiles(app.Hive.Server, app); err != nil {
+			return err
+		}
+		return remoteHive(app.Hive.Server, app, "up", remoteArgs)
 	}
 
 	return selectRunner(app, *dockerFlag).Up(ctx, app)
@@ -272,7 +360,7 @@ func cmdDown(ctx context.Context, args []string) error {
 		return err
 	}
 	if app.Hive.Server != "" && !*localFlag {
-		return remoteHive(app.Hive.Server, app.Dir, "down", append(fs.Args(), "--local"))
+		return remoteHive(app.Hive.Server, app, "down", append(fs.Args(), "--local"))
 	}
 
 	// Stop whichever backend is actually managing the node: a docker
@@ -390,7 +478,7 @@ func resolveWorkspaceApp(cwd, filter string, packagesFlags []string) (*App, erro
 
 func printSingleStatus(ctx context.Context, app *App, local, jsonFlag bool) error {
 	if app.Hive.Server != "" && !local {
-		return remoteHive(app.Hive.Server, app.Dir, "status", []string{"--local"})
+		return remoteHive(app.Hive.Server, app, "status", []string{"--local"})
 	}
 
 	res, err := gatherStatus(ctx, app)
@@ -476,7 +564,7 @@ func firstNonEmpty(a, b string) string {
 
 func gatherStatusForFleet(ctx context.Context, app *App, local bool) statusResult {
 	if app.Hive.Server != "" && !local {
-		res, err := remoteStatusJSON(app.Hive.Server, app.Dir)
+		res, err := remoteStatusJSON(app.Hive.Server, app)
 		if err == nil {
 			return res
 		}
@@ -489,7 +577,11 @@ func gatherStatusForFleet(ctx context.Context, app *App, local bool) statusResul
 	return res
 }
 
-func remoteStatusJSON(server, dir string) (statusResult, error) {
+func remoteStatusJSON(server string, app *App) (statusResult, error) {
+	dir, err := remoteAppDir(app)
+	if err != nil {
+		return statusResult{}, err
+	}
 	remoteCmd := fmt.Sprintf("cd %s && ~/.local/bin/hive status --local --json", shellSingleQuote(dir))
 	cmd := exec.Command("ssh", server, remoteCmd)
 	var out, stderr bytes.Buffer
@@ -689,21 +781,28 @@ func remoteRestart(app *App, dockerFlag, jsonMode bool) error {
 	if err := syncAppEnvFile(app.Hive.Server, app); err != nil {
 		return err
 	}
+	if err := syncAppFiles(app.Hive.Server, app); err != nil {
+		return err
+	}
 	downArgs := []string{"--local"}
-	if err := runRemoteHive(app.Hive.Server, app.Dir, "down", downArgs, jsonMode); err != nil {
+	if err := runRemoteHive(app.Hive.Server, app, "down", downArgs, jsonMode); err != nil {
 		return fmt.Errorf("remote down: %w", err)
 	}
 	upArgs := []string{"--local"}
 	if dockerFlag {
 		upArgs = append(upArgs, "--docker")
 	}
-	if err := runRemoteHive(app.Hive.Server, app.Dir, "up", upArgs, jsonMode); err != nil {
+	if err := runRemoteHive(app.Hive.Server, app, "up", upArgs, jsonMode); err != nil {
 		return fmt.Errorf("remote up: %w", err)
 	}
 	return nil
 }
 
-func runRemoteHive(server, dir, cmd string, args []string, toStderr bool) error {
+func runRemoteHive(server string, app *App, cmd string, args []string, toStderr bool) error {
+	dir, err := remoteAppDir(app)
+	if err != nil {
+		return err
+	}
 	remoteCmd := fmt.Sprintf("cd %s && ~/.local/bin/hive %s", shellSingleQuote(dir), shellJoin(append([]string{cmd}, args...)))
 	c := exec.Command("ssh", server, remoteCmd)
 	c.Stdin = os.Stdin

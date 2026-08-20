@@ -51,11 +51,11 @@ Two files per app, same directory:
 
 ```json
 {
-  "hive": { "port": 8101, "domain": "app.example.com", "server": "user@box", "backend": "docker" }
+  "hive": { "port": 8101, "domain": "app.example.com", "server": "user@box", "dir": "/opt/apps/myapp", "backend": "docker" }
 }
 ```
 
-`port` is required. `domain`, `server`, `backend` are optional (local-only apps skip them).
+`port` is required. `domain`, `server`, `dir`, `backend` are optional (local-only apps skip them). When `server` is set, `dir` is the absolute path of the app directory on the server; if omitted, the local path is used verbatim, which only works when the box shares the same filesystem layout.
 
 ## Monorepos
 
@@ -115,6 +115,8 @@ One node per fleet bucket prefix, ever. Two nodes on the same `s3://bucket/<app>
 ## Remote operation
 
 Set `"server": "user@box"` in the hive block and commands proxy to the hive binary on the box over SSH (`ssh box hive <cmd> --local`). No RPC protocol; the same backends run there. `celld deploy` itself is bucket-direct from anywhere — only restart and health checks touch the box. `--local` forces local operation even when `server` is set.
+
+When the server's app directory differs from the local one, set `"dir": "/absolute/path/on/server"` in the hive block. It must be absolute (no `~`). On `deploy`/`up`, hive creates the directory and syncs `package.json` + `wrangler.jsonc` there before running the remote command. `down` and `status` also use `dir` when set.
 
 Box setup: the hive binary at `~/.local/bin/hive`, celld alongside it, docker if wanted. Credentials sync over SSH as `~/.config/hive/<app>.env` (0600). Rebuild + scp the box's hive binary after hive upgrades or it runs stale code.
 
