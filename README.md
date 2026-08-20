@@ -83,7 +83,7 @@ Every command takes `--json` and prints machine-readable output. Agents are the 
 | command | flags | what it does |
 | --- | --- | --- |
 | `hive add <name>` | `--port`, `--force` | Scaffold a new app (wrangler.jsonc + index.ts + tsconfig + package.json), allocate a free port |
-| `hive deploy` | `--docker`, `--local` | Typecheck (`tsc -b`) → `celld deploy` → restart the node → wait for `/__celld/health` (30s gate). Prints the version ID |
+| `hive deploy` | `--docker`, `--local`, `--no-restart` | Typecheck (`tsc -b`) → `celld deploy` → restart the node → wait for `/__celld/health` (30s gate). Prints the version ID. `--no-restart` uploads only, for externally supervised nodes (Coolify & co.) |
 | `hive deploy all` | `--docker`, `--local`, `--packages` | Deploy every app in the workspace sequentially, continuing past failures |
 | `hive up` | `--docker`, `--local` | Start the node. Idempotent; config drift → restart |
 | `hive down` | `--local` | Stop the node gracefully (SIGTERM; celld drains in-flight work) |
@@ -141,6 +141,53 @@ hive exe domain           # mybot.example.com live: DNS-only CNAME + exe.dev reg
 `exe domain` uses your Cloudflare credentials to create the CNAME and hard-requires `proxied: false` — exe.dev terminates TLS itself and orange-cloud records break it. Without cf credentials it prints the exact record to create and exits; re-run after creating it. Registration is verified via exe.dev's `domain ls` and retried, since their resolver lags yours.
 
 CI: a stock GitHub-hosted runner runs `hive deploy`; it reaches the box via SSH through the Cloudflare Tunnel (`hive cf tunnel --ssh` adds the `ssh.<domain>` ingress rule; `sshd` bound to loopback, cloudflared as SSH ProxyCommand). Secrets: bucket creds, SSH key, tunnel token.
+
+## Going to production: a box and a domain
+
+Starting from a plain `index.ts` + `wrangler.jsonc`, the whole journey:
+
+```sh
+hive init                        # one-time: port + bucket credentials
+# point the app at a box in package.json:
+#   "hive": { "port": 8101, "server": "user@box", "dir": "/opt/apps/myapp", "domain": "app.example.com" }
+hive bootstrap                   # one-time: hive + celld on the box
+hive deploy                      # ship, restart, health-gate — over ssh
+```
+
+Then pick an ingress — all three end at the same `127.0.0.1:<port>` listener:
+
+- **exe.dev**: `hive exe share && hive exe domain` — the VM's front door does TLS.
+- **Cloudflare Tunnel**: `hive cf tunnel`, then install cloudflared on the box with the printed token — zero inbound ports.
+- **Anything else**: reverse-proxy `127.0.0.1:8101` yourself (caddy, nginx, Coolify below).
+
+**Updating** is the same command forever: edit `index.ts`, `hive deploy`, done — new version ID, node restart, health gate before it reports ok. CI is a stock GitHub-hosted runner with bucket creds + an SSH key running `hive deploy`.
+
+## Coolify
+
+Coolify replaces hive's node supervision and ingress, not the deploy pipeline. celld loads `deploy/current.json` at startup — the restart is the reload — and a Coolify redeploy only fires on git push, not on a bucket write. So the split is: Coolify runs the container and owns TLS + domain; CI ships the code and restarts the app.
+
+```dockerfile
+# Dockerfile — celld node for Coolify
+FROM debian:stable-slim
+RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates \
+ && rm -rf /var/lib/apt/lists/* \
+ && curl -fsSL https://celld.dev/install.sh | sh
+ENV PATH="/root/.local/bin:$PATH"
+CMD ["celld", "--bucket", "<bucket>/<app>", "--listen", "0.0.0.0:8101", \
+     "--endpoint", "https://<account>.r2.cloudflarestorage.com", "--region", "auto", \
+     "--trust-forwarded-headers"]
+```
+
+Set the S3 credentials (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, …) in Coolify's env UI, assign the domain there, and point its health check at `/__celld/health`. Note the `0.0.0.0` bind — Coolify's proxy reaches the container over the docker network, unlike hive's loopback posture.
+
+CI deploy step:
+
+```sh
+hive deploy --no-restart                 # upload the new version to the bucket
+curl -X POST "$COOLIFY_DEPLOY_WEBHOOK"   # restart the container so it loads current.json
+```
+
+Two gotchas: never scale past **1 replica** (two nodes on one bucket prefix = `DurableObjectRoutingError`), and the Dockerfile tracks whatever celld.dev serves latest — pin a version if you care.
 
 ## Environment variables
 
