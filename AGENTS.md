@@ -77,20 +77,28 @@ Two files per app project, same directory:
 - `celld diagnose --bucket ...` enumerates node leases and probes peers.
 - TS wrinkle: `DurableObjectNamespace<T>` in @cloudflare/workers-types requires a branded class; use the non-generic `DurableObjectNamespace` unless extending `DurableObject` from `cloudflare:workers`.
 
+## Deploy implementation notes (from dogfooding)
+
+- `celld deploy` invocation, equivalent to `scripts/deploy.sh`: run from the app directory with `celld deploy --bucket <CELLD_BUCKET>/<app> --endpoint <S3_ENDPOINT> --region <AWS_REGION>`. Credentials come from the environment (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION`, `S3_ENDPOINT`). Stream stdout/stderr; on failure relay the output unchanged.
+- Version ID: celld prints `Current Version ID: <16-char hex>` on success (e.g. `d733f37ce356fc35`). `hive deploy --json` surfaces this as `"version"`.
+- Health gate: after restart, poll `GET 127.0.0.1:<port>/__celld/health` until `{"ok":true}` or a 30 s timeout. On timeout, error and point at `.hive/node.log`.
+- Typecheck: run `tsc -b` in the app directory; use `node_modules/.bin/tsc` if found (walking up from the app dir for monorepo layouts), else `tsc` on PATH. Skip with a note if no `tsconfig.json`.
+- Remote restart: when `hive.server` is set, `celld deploy` still runs locally (bucket-direct); only restart+health proxy over `ssh <server> hive down --local [--daemon]` then `ssh <server> hive up --local [--daemon]`.
+
 ## Test environments (live)
 
-- **playground** at `~/Work/playground` — the consumer/test apps. Has its own AGENTS.md. R2 bucket `old-bucket` (EU endpoint, `AWS_REGION=auto`), creds in `env.sh` (source it; never copy creds elsewhere). Apps: `counter` (port 8101, SQLite counter DO) and `wsecho` (port 8102, hibernatable WS DO), TS, deployable via `scripts/deploy.sh`. These apps' package.json files don't have `"hive"` blocks yet — adding them is the first dogfood.
+- **playground** at `~/Work/playground` — the consumer/test apps. Has its own AGENTS.md. R2 bucket `old-bucket` (EU endpoint, `AWS_REGION=auto`), creds in `env.sh` (source it; never copy creds elsewhere). Apps: `counter` (port 8101, SQLite counter DO) and `wsecho` (port 8102, hibernatable WS DO), TS, deployable via `scripts/deploy.sh`. `counter/package.json` now has a `"hive"` block; `wsecho` does not yet.
 - **remote box** — `user@box`, SSH key auth confirmed working, macOS 26.4.1 arm64, cloudflared NOT installed yet (`brew install cloudflared`). First launchd-backend and tunnel target. Stand-in for "barebones box."
 
 ## Current state
 
-Scaffold only. `main.go` (dispatch + usage), `registry.go` (loads app config — real, tested pattern), `commands.go` (all stubs). Builds clean: `go vet ./... && go build .`. No git history yet (`git init` done, nothing committed — ask before committing).
+`add`, `up`/`down`, and `deploy` are implemented and dogfooded against `playground/apps/counter`. `check`, `init`, `login`, `tunnel`, and `ui` are still stubs. Builds clean: `go vet ./... && CGO_ENABLED=0 go build .`.
 
 ## Build order (next steps, in order)
 
 1. `add` — template scaffolding + port allocation (dogfood by converting playground apps to hive projects).
 2. `up`/`down` local backend — ✅ process backend done; launchd/systemd code written.
-3. `deploy` — tsc → celld deploy → restart → health gate. This completes the local loop; everything before the server work.
+3. `deploy` — ✅ tsc → celld deploy → restart → health gate. Dogfooded end-to-end against `counter`.
 4. `check` — celld-legal key list validation.
 5. launchd backend on the remote box (dry-run, not done); systemd backend (code written, untested locally).
 6. `tunnel` — REST-driven remotely-managed tunnel.
