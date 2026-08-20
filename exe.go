@@ -65,6 +65,50 @@ func exeCLI(ctx context.Context, args ...string) (string, error) {
 	return string(out), nil
 }
 
+// exeVMExists reports whether a VM with this name exists on the account.
+func exeVMExists(ctx context.Context, name string) (bool, error) {
+	out, err := exeCLI(ctx, "ls", "--json")
+	if err != nil {
+		return false, err
+	}
+	var res struct {
+		VMs []struct {
+			VMName string `json:"vm_name"`
+		} `json:"vms"`
+	}
+	if err := json.Unmarshal([]byte(out), &res); err != nil {
+		return false, fmt.Errorf("parse exe ls: %w", err)
+	}
+	for _, vm := range res.VMs {
+		if vm.VMName == name {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// exeDomainRegistered verifies a domain registration via `domain ls --json`.
+func exeDomainRegistered(ctx context.Context, vm, domain string) (bool, error) {
+	out, err := exeCLI(ctx, "domain", "ls", vm, "--json")
+	if err != nil {
+		return false, err
+	}
+	var res struct {
+		Domains []struct {
+			Domain string `json:"domain"`
+		} `json:"domains"`
+	}
+	if err := json.Unmarshal([]byte(out), &res); err != nil {
+		return false, fmt.Errorf("parse exe domain ls: %w", err)
+	}
+	for _, d := range res.Domains {
+		if d.Domain == domain {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 // waitForDNS polls the resolver until host resolves or the timeout hits.
 // Fresh exe.dev VMs and DNS records take tens of seconds to propagate.
 func waitForDNS(ctx context.Context, host string, timeout time.Duration) error {
@@ -100,8 +144,16 @@ func cmdExeNew(ctx context.Context, args []string) error {
 		return fmt.Errorf("invalid VM name %q (lowercase letters, digits, dashes)", name)
 	}
 
-	if _, err := exeCLI(ctx, "new", "--name", name); err != nil {
+	created := false
+	exists, err := exeVMExists(ctx, name)
+	if err != nil {
 		return err
+	}
+	if !exists {
+		if _, err := exeCLI(ctx, "new", "--name", name); err != nil {
+			return err
+		}
+		created = true
 	}
 	host := name + ".exe.xyz"
 	if err := waitForDNS(ctx, host, 2*time.Minute); err != nil {
@@ -112,7 +164,8 @@ func cmdExeNew(ctx context.Context, args []string) error {
 		res := struct {
 			Name     string `json:"name"`
 			Hostname string `json:"hostname"`
-		}{name, host}
+			Created  bool   `json:"created"`
+		}{name, host, created}
 		b, err := json.MarshalIndent(res, "", "  ")
 		if err != nil {
 			return fmt.Errorf("marshal result: %w", err)
@@ -120,7 +173,11 @@ func cmdExeNew(ctx context.Context, args []string) error {
 		fmt.Println(string(b))
 		return nil
 	}
-	fmt.Printf("created vm %q\n", name)
+	if created {
+		fmt.Printf("created vm %q\n", name)
+	} else {
+		fmt.Printf("vm %q already exists\n", name)
+	}
 	fmt.Printf("ssh:   ssh %s\n", host)
 	fmt.Printf("https: https://%s\n", host)
 	return nil
@@ -154,6 +211,22 @@ func cmdExeShare(ctx context.Context, args []string) error {
 	}
 	if _, err := exeCLI(ctx, "share", visibility, vm); err != nil {
 		return err
+	}
+
+	wantStatus := strings.TrimPrefix(visibility, "set-")
+	out, err := exeCLI(ctx, "share", "show", vm, "--json")
+	if err != nil {
+		return err
+	}
+	var show struct {
+		Port   int    `json:"port"`
+		Status string `json:"status"`
+	}
+	if err := json.Unmarshal([]byte(out), &show); err != nil {
+		return fmt.Errorf("parse exe share show: %w", err)
+	}
+	if show.Port != app.Hive.Port || show.Status != wantStatus {
+		return fmt.Errorf("share did not take effect: got port %d, status %q (want %d, %q)", show.Port, show.Status, app.Hive.Port, wantStatus)
 	}
 
 	if *jsonFlag {
@@ -219,7 +292,7 @@ func cmdExeDomain(ctx context.Context, args []string) error {
 		if _, err := exeCLI(ctx, "domain", "add", vm, app.Hive.Domain); err != nil {
 			lastErr = err
 		}
-		if out, err := exeCLI(ctx, "domain", "ls", vm); err == nil && strings.Contains(out, app.Hive.Domain) {
+		if ok, err := exeDomainRegistered(ctx, vm, app.Hive.Domain); err == nil && ok {
 			registered = true
 			break
 		}
