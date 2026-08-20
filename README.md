@@ -83,16 +83,17 @@ Every command takes `--json` and prints machine-readable output. Agents are the 
 | command | flags | what it does |
 | --- | --- | --- |
 | `hive add <name>` | `--port`, `--force` | Scaffold a new app (wrangler.jsonc + index.ts + tsconfig + package.json), allocate a free port |
-| `hive deploy` | `--docker`, `--local`, `--no-restart` | Typecheck (`tsc -b`) → `celld deploy` → restart the node → wait for `/__celld/health` (30s gate). Prints the version ID. `--no-restart` uploads only, for externally supervised nodes (Coolify & co.) |
+| `hive deploy` | `--docker`, `--local`, `--no-restart`, `--filter` | Typecheck (`tsc -b`) → `celld deploy` → restart the node → wait for `/__celld/health` (30s gate). Prints the version ID. `--no-restart` uploads only, for externally supervised nodes (Coolify & co.) |
 | `hive deploy all` | `--docker`, `--local`, `--packages` | Deploy every app in the workspace sequentially, continuing past failures |
 | `hive up` | `--docker`, `--local` | Start the node. Idempotent; config drift → restart |
 | `hive down` | `--local` | Stop the node gracefully (SIGTERM; celld drains in-flight work) |
 | `hive status` | `--local`, `--filter` | App config + node state; from a workspace root, show a compact fleet table |
+| `hive ui` | — | Local dashboard; fleet view from a workspace root, single-app view from an app dir |
 | `hive init` | `--bucket`, `--access-key`, `--secret-key`, `--endpoint`, `--region`, `--jurisdiction`, `--force` | Provision bucket credentials into `~/.config/hive/<app>.env` (0600) |
 | `hive bootstrap` | — | Install hive + celld at `~/.local/bin` on the app's server (idempotent) |
 | `hive cf login` | `--status`, `--export`, `--no-browser` | Cloudflare OAuth consent (PKCE); stores a refreshable token |
 | `hive cf tunnel` | `--name`, `--ssh` | Create/sync a remotely-managed Cloudflare Tunnel: ingress rules + DNS, prints the box install command |
-| `hive exe new <name>` | — | Create an exe.dev VM and wait for its DNS to propagate |
+| `hive exe new <name>` | — | Create an exe.dev VM (idempotent) and wait for its DNS to propagate |
 | `hive exe share` | `--private` | Point the exe.dev HTTPS proxy at the app's port; public by default |
 | `hive exe domain` | — | CNAME the app's domain to the VM (DNS-only, via Cloudflare creds) and register it with exe.dev |
 

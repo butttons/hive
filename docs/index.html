@@ -316,16 +316,17 @@ curl http://127.0.0.1:&lt;port&gt;/</code></pre>
         <thead><tr><th>command</th><th>flags</th><th>what it does</th></tr></thead>
         <tbody>
           <tr><td><code>hive add &lt;name&gt;</code></td><td><code>--port</code>, <code>--force</code></td><td>Scaffold a new app (wrangler.jsonc + index.ts + tsconfig + package.json), allocate a free port</td></tr>
-          <tr><td><code>hive deploy</code></td><td><code>--docker</code>, <code>--local</code>, <code>--no-restart</code></td><td>Typecheck (<code>tsc -b</code>) → <code>celld deploy</code> → restart the node → wait for <code>/__celld/health</code> (30s gate). Prints the version ID. <code>--no-restart</code> uploads only, for externally supervised nodes</td></tr>
+          <tr><td><code>hive deploy</code></td><td><code>--docker</code>, <code>--local</code>, <code>--no-restart</code>, <code>--filter</code></td><td>Typecheck (<code>tsc -b</code>) → <code>celld deploy</code> → restart the node → wait for <code>/__celld/health</code> (30s gate). Prints the version ID. <code>--no-restart</code> uploads only, for externally supervised nodes</td></tr>
           <tr><td><code>hive deploy all</code></td><td><code>--docker</code>, <code>--local</code>, <code>--packages</code></td><td>Deploy every workspace app sequentially, continuing past failures</td></tr>
           <tr><td><code>hive up</code></td><td><code>--docker</code>, <code>--local</code></td><td>Start the node. Idempotent; config drift → restart</td></tr>
           <tr><td><code>hive down</code></td><td><code>--local</code></td><td>Stop the node gracefully (SIGTERM; celld drains in-flight work)</td></tr>
           <tr><td><code>hive status</code></td><td><code>--local</code>, <code>--filter</code></td><td>App config + node state; from a workspace root, show a compact fleet table</td></tr>
+          <tr><td><code>hive ui</code></td><td>—</td><td>Local dashboard; fleet view from a workspace root, single-app view from an app dir</td></tr>
           <tr><td><code>hive init</code></td><td><code>--bucket</code>, <code>--access-key</code>, <code>--secret-key</code>, <code>--endpoint</code>, <code>--region</code>, <code>--jurisdiction</code>, <code>--force</code></td><td>Provision bucket credentials into <code>~/.config/hive/&lt;app&gt;.env</code> (0600)</td></tr>
           <tr><td><code>hive bootstrap</code></td><td>—</td><td>Install hive + celld at <code>~/.local/bin</code> on the app's server (idempotent; re-run to upgrade)</td></tr>
           <tr><td><code>hive cf login</code></td><td><code>--status</code>, <code>--export</code>, <code>--no-browser</code></td><td>Cloudflare OAuth consent (PKCE); stores a refreshable token</td></tr>
           <tr><td><code>hive cf tunnel</code></td><td><code>--name</code>, <code>--ssh</code></td><td>Create/sync a remotely-managed Cloudflare Tunnel: ingress rules + DNS, prints the box install command</td></tr>
-          <tr><td><code>hive exe new &lt;name&gt;</code></td><td>—</td><td>Create an exe.dev VM and wait for its DNS to propagate</td></tr>
+          <tr><td><code>hive exe new &lt;name&gt;</code></td><td>—</td><td>Create an exe.dev VM (idempotent) and wait for its DNS to propagate</td></tr>
           <tr><td><code>hive exe share</code></td><td><code>--private</code></td><td>Point the exe.dev HTTPS proxy at the app's port; public by default</td></tr>
           <tr><td><code>hive exe domain</code></td><td>—</td><td>CNAME the app's domain to the VM (DNS-only, via Cloudflare creds) and register it with exe.dev</td></tr>
         </tbody>
