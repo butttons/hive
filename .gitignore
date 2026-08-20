@@ -2,3 +2,5 @@ hive
 hive-*
 *.env
 AGENTS.local.md
+.wrangler
+.playwright-cli
