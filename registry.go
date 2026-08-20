@@ -58,12 +58,29 @@ func LoadApp(dir string) (*App, error) {
 }
 
 // stripJSONC removes // and /* */ comments so encoding/json can read
-// wrangler.jsonc. Does not handle comment markers inside strings; good
-// enough for config files we control.
+// wrangler.jsonc. Handles string literals so comment-like sequences inside
+// strings (e.g. URL patterns) are preserved.
 func stripJSONC(b []byte) []byte {
 	out := make([]byte, 0, len(b))
-	i := 0
-	for i < len(b) {
+	inString := false
+	for i := 0; i < len(b); i++ {
+		if inString {
+			out = append(out, b[i])
+			if b[i] == '\\' && i+1 < len(b) {
+				out = append(out, b[i+1])
+				i++
+				continue
+			}
+			if b[i] == '"' {
+				inString = false
+			}
+			continue
+		}
+		if b[i] == '"' {
+			inString = true
+			out = append(out, b[i])
+			continue
+		}
 		if i+1 < len(b) && b[i] == '/' && b[i+1] == '/' {
 			for i < len(b) && b[i] != '\n' {
 				i++
@@ -75,11 +92,10 @@ func stripJSONC(b []byte) []byte {
 			for i+1 < len(b) && !(b[i] == '*' && b[i+1] == '/') {
 				i++
 			}
-			i += 2
+			i++
 			continue
 		}
 		out = append(out, b[i])
-		i++
 	}
 	return out
 }

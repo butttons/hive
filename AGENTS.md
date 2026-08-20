@@ -39,7 +39,7 @@ Two files per app project, same directory:
 - No `server` = operate locally.
 - `server` set = the local CLI proxies to the hive binary installed on the box: `ssh <server> hive <cmd> <args> --local`. One implementation of the run backends, no RPC protocol.
 - `celld deploy` itself is bucket-direct from anywhere; only node restart + health checks touch the box.
-- CI/CD = self-hosted GitHub Actions runner on the box (outbound-only, matches zero-inbound-ports posture); the workflow just runs `hive deploy` locally on the box.
+- CI = stock GitHub-hosted runner running `hive deploy`. The runner reaches the box via SSH through the Cloudflare Tunnel: one extra ingress rule (`ssh.<domain>` → `ssh://localhost:22`), `sshd` bound to loopback only, and `cloudflared` as an SSH ProxyCommand. Secrets: bucket creds, SSH key, tunnel token. Future simplification: celld's alpha `POST /shutdown` behind an Access-gated tunnel hostname + keepalive restart could replace SSH later; not building it now.
 
 ## Command surface (settled; all stubbed in commands.go)
 
@@ -92,14 +92,14 @@ Two files per app project, same directory:
 
 ## Current state
 
-`add`, `up`/`down`, and `deploy` are implemented and dogfooded against `playground/apps/counter`. `check`, `init`, `login`, `tunnel`, and `ui` are still stubs. Builds clean: `go vet ./... && CGO_ENABLED=0 go build .`.
+`add`, `up`/`down`, `deploy`, and `check` are implemented and dogfooded against `playground/apps/counter`. `init`, `login`, `tunnel`, and `ui` are still stubs. Builds clean: `go vet ./... && CGO_ENABLED=0 go build `.
 
 ## Build order (next steps, in order)
 
 1. `add` — template scaffolding + port allocation (dogfood by converting playground apps to hive projects).
 2. `up`/`down` local backend — ✅ process backend done; launchd/systemd code written.
 3. `deploy` — ✅ tsc → celld deploy → restart → health gate. Dogfooded end-to-end against `counter`.
-4. `check` — celld-legal key list validation.
+4. `check` — ✅ celld-legal key list validation + deploy-path dry-run.
 5. launchd backend on the remote box (dry-run, not done); systemd backend (code written, untested locally).
 6. `tunnel` — REST-driven remotely-managed tunnel.
 7. `login`/`init` — OAuth + bucket provisioning (resolve the R2 S3-keys API gap first).

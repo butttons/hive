@@ -12,12 +12,267 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"syscall"
 	"time"
 )
 
-func cmdCheck(ctx context.Context, args []string) error { return notImplemented("check") }
+func cmdCheck(ctx context.Context, args []string) error {
+	args = normalizeFlags(args, map[string]bool{})
+	fs := flag.NewFlagSet("check", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	jsonFlag := fs.Bool("json", false, "")
+	if err := fs.Parse(args); err != nil {
+		return fmt.Errorf("parse flags: %w", err)
+	}
+
+	start := time.Now()
+	app, err := loadCwdApp()
+	if err != nil {
+		return err
+	}
+
+	steps, ok := runChecks(ctx, app, *jsonFlag)
+	printCheckResult(app, steps, start, *jsonFlag)
+	if !ok {
+		return fmt.Errorf("check failed")
+	}
+	return nil
+}
+
+// celldLegalKeys is the allowlist from celld's wrangler.jsonc parser.
+// Derived from crates/celld/deploy.rs SUPPORTED_KEYS at celld v0.2.1.
+var celldLegalKeys = map[string]bool{
+	"$schema":             true,
+	"name":                true,
+	"main":                true,
+	"compatibility_date":  true,
+	"compatibility_flags": true,
+	"durable_objects":     true,
+	"migrations":          true,
+	"assets":              true,
+	"services":            true,
+	"vars":                true,
+	"no_bundle":           true,
+}
+
+// hiveOnlyKeys are wrangler.jsonc keys that celld rejects and that belong in
+// package.json's "hive" block instead.
+var hiveOnlyKeys = map[string]bool{
+	"routes": true,
+	"port":   true,
+	"domain": true,
+}
+
+type checkStep struct {
+	Name       string `json:"name"`
+	OK         bool   `json:"ok"`
+	Skipped    bool   `json:"skipped,omitempty"`
+	Error      string `json:"error,omitempty"`
+	Detail     string `json:"detail,omitempty"`
+	DurationMs int64  `json:"duration_ms"`
+}
+
+type checkResult struct {
+	App        string      `json:"app"`
+	OK         bool        `json:"ok"`
+	Checks     []checkStep `json:"checks"`
+	DurationMs int64       `json:"duration_ms"`
+}
+
+func runChecks(ctx context.Context, app *App, jsonMode bool) ([]checkStep, bool) {
+	var steps []checkStep
+	overall := true
+
+	st := startStep("config")
+	wranglerPath := filepath.Join(app.Dir, "wrangler.jsonc")
+	config, err := readWranglerObject(wranglerPath)
+	if err != nil {
+		steps = append(steps, checkStep{Name: st.name, OK: false, Error: err.Error(), DurationMs: time.Since(st.start).Milliseconds()})
+		return steps, false
+	}
+	name, _ := config["name"].(string)
+	main, _ := config["main"].(string)
+	if name == "" {
+		steps = append(steps, checkStep{Name: st.name, OK: false, Error: "wrangler.jsonc: missing \"name\"", DurationMs: time.Since(st.start).Milliseconds()})
+		overall = false
+	} else if main == "" {
+		steps = append(steps, checkStep{Name: st.name, OK: false, Error: "wrangler.jsonc: missing \"main\"", DurationMs: time.Since(st.start).Milliseconds()})
+		overall = false
+	} else {
+		steps = append(steps, checkStep{Name: st.name, OK: true, Detail: fmt.Sprintf("name=%s main=%s", name, main), DurationMs: time.Since(st.start).Milliseconds()})
+	}
+
+	st = startStep("keys")
+	var illegal []string
+	var shouldBeHive []string
+	for k := range config {
+		if !celldLegalKeys[k] {
+			illegal = append(illegal, k)
+			if hiveOnlyKeys[k] {
+				shouldBeHive = append(shouldBeHive, k)
+			}
+		}
+	}
+	slices.Sort(illegal)
+	slices.Sort(shouldBeHive)
+	if len(illegal) > 0 {
+		msg := fmt.Sprintf("celld does not support these config keys: %s", strings.Join(illegal, ", "))
+		if len(shouldBeHive) > 0 {
+			msg += fmt.Sprintf(". Move %s to package.json's \"hive\" block", strings.Join(shouldBeHive, ", "))
+		}
+		steps = append(steps, checkStep{Name: st.name, OK: false, Error: msg, DurationMs: time.Since(st.start).Milliseconds()})
+		overall = false
+	} else {
+		steps = append(steps, checkStep{Name: st.name, OK: true, DurationMs: time.Since(st.start).Milliseconds()})
+	}
+
+	st = startStep("files")
+	mainPath := filepath.Join(app.Dir, main)
+	if _, err := os.Stat(mainPath); err != nil {
+		steps = append(steps, checkStep{Name: st.name, OK: false, Error: fmt.Sprintf("main entry not found: %s", mainPath), DurationMs: time.Since(st.start).Milliseconds()})
+		overall = false
+	} else {
+		steps = append(steps, checkStep{Name: st.name, OK: true, DurationMs: time.Since(st.start).Milliseconds()})
+	}
+
+	st = startStep("binary")
+	if _, err := celldPath(); err != nil {
+		steps = append(steps, checkStep{Name: st.name, OK: false, Error: err.Error(), DurationMs: time.Since(st.start).Milliseconds()})
+		overall = false
+	} else {
+		steps = append(steps, checkStep{Name: st.name, OK: true, DurationMs: time.Since(st.start).Milliseconds()})
+	}
+
+	st = startStep("typecheck")
+	tsconfigPath := filepath.Join(app.Dir, "tsconfig.json")
+	if _, err := os.Stat(tsconfigPath); os.IsNotExist(err) {
+		steps = append(steps, checkStep{Name: st.name, OK: true, Skipped: true, Detail: "no tsconfig.json", DurationMs: time.Since(st.start).Milliseconds()})
+	} else {
+		if _, err := findTSC(app); err != nil {
+			steps = append(steps, checkStep{Name: st.name, OK: true, Skipped: true, Detail: "tsc not found (run npm install)", DurationMs: time.Since(st.start).Milliseconds()})
+		} else if err := runCheckTypecheck(ctx, app, jsonMode); err != nil {
+			steps = append(steps, checkStep{Name: st.name, OK: false, Error: err.Error(), DurationMs: time.Since(st.start).Milliseconds()})
+			overall = false
+		} else {
+			steps = append(steps, checkStep{Name: st.name, OK: true, DurationMs: time.Since(st.start).Milliseconds()})
+		}
+	}
+
+	st = startStep("bundle")
+	if os.Getenv("CELLD_BUCKET") == "" {
+		steps = append(steps, checkStep{Name: st.name, OK: true, Skipped: true, Detail: "CELLD_BUCKET not set", DurationMs: time.Since(st.start).Milliseconds()})
+	} else {
+		if err := runCelldDryRun(ctx, app, jsonMode); err != nil {
+			steps = append(steps, checkStep{Name: st.name, OK: false, Error: err.Error(), DurationMs: time.Since(st.start).Milliseconds()})
+			overall = false
+		} else {
+			steps = append(steps, checkStep{Name: st.name, OK: true, DurationMs: time.Since(st.start).Milliseconds()})
+		}
+	}
+
+	return steps, overall
+}
+
+func readWranglerObject(path string) (map[string]any, error) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read %s: %w", path, err)
+	}
+	var v map[string]any
+	if err := json.Unmarshal(stripJSONC(b), &v); err != nil {
+		return nil, fmt.Errorf("parse %s: %w", path, err)
+	}
+	return v, nil
+}
+
+func runCheckTypecheck(ctx context.Context, app *App, jsonMode bool) error {
+	_, err := runTypecheck(ctx, app, jsonMode)
+	return err
+}
+
+func runCelldDryRun(ctx context.Context, app *App, jsonMode bool) error {
+	bin, err := celldPath()
+	if err != nil {
+		return err
+	}
+	bucket, err := celldBucketEnv()
+	if err != nil {
+		return err
+	}
+
+	args := []string{
+		"deploy",
+		"--dry-run",
+		"--bucket", bucket + "/" + app.Name,
+	}
+	if ep := os.Getenv("S3_ENDPOINT"); ep != "" {
+		args = append(args, "--endpoint", ep)
+	}
+	if r := os.Getenv("AWS_REGION"); r != "" {
+		args = append(args, "--region", r)
+	}
+
+	var stdout, stderr io.Writer
+	if jsonMode {
+		stdout = os.Stderr
+		stderr = os.Stderr
+	} else {
+		stdout = os.Stdout
+		stderr = os.Stderr
+	}
+
+	cmd := exec.CommandContext(ctx, bin, args...)
+	cmd.Dir = app.Dir
+	cmd.Env = append(os.Environ(), celldEnviron()...)
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("celld deploy --dry-run failed: %w", err)
+	}
+	return nil
+}
+
+func printCheckResult(app *App, steps []checkStep, start time.Time, jsonMode bool) {
+	ok := true
+	for _, s := range steps {
+		if !s.OK {
+			ok = false
+			break
+		}
+	}
+	if jsonMode {
+		res := checkResult{
+			App:        app.Name,
+			OK:         ok,
+			Checks:     steps,
+			DurationMs: time.Since(start).Milliseconds(),
+		}
+		b, err := json.MarshalIndent(res, "", "  ")
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "hive check: marshal result: %v\n", err)
+			return
+		}
+		fmt.Println(string(b))
+		return
+	}
+
+	for _, s := range steps {
+		if s.Skipped {
+			fmt.Printf("%s skipped (%s)\n", s.Name, s.Detail)
+		} else if s.OK {
+			fmt.Printf("%s ok (%dms)\n", s.Name, s.DurationMs)
+		} else {
+			fmt.Printf("%s failed (%dms): %s\n", s.Name, s.DurationMs, s.Error)
+		}
+	}
+	if ok {
+		fmt.Printf("%s can deploy to celld (%dms)\n", app.Name, time.Since(start).Milliseconds())
+	} else {
+		fmt.Printf("%s cannot deploy to celld (%dms)\n", app.Name, time.Since(start).Milliseconds())
+	}
+}
 
 func cmdDeploy(ctx context.Context, args []string) error {
 	args = normalizeFlags(args, map[string]bool{})
