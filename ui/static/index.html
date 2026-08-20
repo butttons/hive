@@ -4,20 +4,20 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>hive</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' fill='%230a0b0d'/%3E%3Crect x='3' y='3' width='10' height='10' fill='%234ade80'/%3E%3C/svg%3E">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' fill='%2309090b'/%3E%3Cpath d='M8 2l5.5 3.25v5.5L8 14l-5.5-3.25v-5.5L8 2z' fill='none' stroke='%2338bdf8' stroke-width='1.5'/%3E%3C/svg%3E">
 <style>
 :root {
-  --bg: #0a0b0d;
-  --bg-panel: #0d0f12;
-  --bg-term: #050607;
-  --fg: #e6e6e6;
-  --fg-muted: #5c6670;
-  --fg-dim: #3a424a;
-  --border: #1e242a;
-  --green: #4ade80;
-  --red: #f87171;
-  --amber: #fbbf24;
-  --blue: #60a5fa;
+  --bg: #09090b;
+  --bg-panel: #18181b;
+  --bg-term: #09090b;
+  --fg: #e4e4e7;
+  --fg-muted: #71717a;
+  --fg-dim: #52525b;
+  --border: #27272a;
+  --accent: #38bdf8;
+  --up: #34d399;
+  --down: #fb7185;
+  --warn: #fbbf24;
 }
 * { box-sizing: border-box; }
 html, body {
@@ -35,6 +35,18 @@ body {
   flex-direction: column;
   min-height: 100vh;
 }
+.icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1em;
+  height: 1em;
+  flex-shrink: 0;
+}
+.icon svg {
+  width: 100%;
+  height: 100%;
+}
 header {
   display: flex;
   align-items: center;
@@ -51,13 +63,20 @@ header {
   letter-spacing: -0.02em;
 }
 .brand .mark {
-  color: var(--green);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--accent);
+}
+.brand .mark .icon {
+  width: 18px;
+  height: 18px;
 }
 .cursor {
   display: inline-block;
   width: 8px;
   height: 16px;
-  background: var(--green);
+  background: var(--accent);
   margin-left: 2px;
   animation: blink 1s step-end infinite;
 }
@@ -73,7 +92,7 @@ header {
 }
 #disconnected {
   display: none;
-  color: var(--red);
+  color: var(--down);
 }
 main {
   flex: 1;
@@ -90,7 +109,7 @@ main {
 }
 .cell {
   border: 1px solid var(--border);
-  border-radius: 2px;
+  border-radius: 6px;
   padding: 12px 14px;
   background: var(--bg-panel);
 }
@@ -112,13 +131,14 @@ main {
   color: var(--fg-dim);
 }
 .cell .value.ok, .cell .value.running {
-  color: var(--green);
+  color: var(--up);
 }
 .cell .value.down, .cell .value.unhealthy {
-  color: var(--red);
+  color: var(--down);
 }
 .fleet-wrap {
   border: 1px solid var(--border);
+  border-radius: 8px;
   background: var(--bg-panel);
   overflow-x: auto;
 }
@@ -138,6 +158,7 @@ main {
   text-transform: uppercase;
   font-size: 10px;
   letter-spacing: 0.1em;
+  font-weight: 500;
 }
 .fleet-wrap tr:last-child td {
   border-bottom: none;
@@ -146,10 +167,43 @@ main {
   cursor: pointer;
 }
 .fleet-wrap tr:hover td {
-  background: rgba(255,255,255,0.02);
+  background: rgba(39, 39, 42, 0.35);
 }
-.fleet-wrap .active td {
-  background: rgba(74, 222, 128, 0.06);
+.fleet-wrap tr.active td {
+  background: rgba(56, 189, 248, 0.08);
+}
+.fleet-wrap td .row-icon {
+  color: var(--fg-muted);
+}
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.status-pill .dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+}
+.status-pill.running, .status-pill.ok { color: var(--up); }
+.status-pill.running .dot, .status-pill.ok .dot { background: var(--up); box-shadow: 0 0 0 2px rgba(52, 211, 153, 0.15); }
+.status-pill.down, .status-pill.unhealthy { color: var(--down); }
+.status-pill.down .dot, .status-pill.unhealthy .dot { background: var(--down); box-shadow: 0 0 0 2px rgba(251, 113, 133, 0.15); }
+.status-pill.unknown { color: var(--warn); }
+.status-pill.unknown .dot { background: var(--warn); box-shadow: 0 0 0 2px rgba(251, 191, 36, 0.15); }
+.status-pill .icon {
+  width: 14px;
+  height: 14px;
+}
+.backend-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.backend-pill .icon {
+  width: 14px;
+  height: 14px;
+  color: var(--fg-muted);
 }
 .logs-wrap {
   flex: 1;
@@ -157,7 +211,7 @@ main {
   flex-direction: column;
   min-height: 0;
   border: 1px solid var(--border);
-  border-radius: 2px;
+  border-radius: 8px;
   background: var(--bg-term);
 }
 .logs-header {
@@ -167,12 +221,20 @@ main {
   padding: 8px 14px;
   border-bottom: 1px solid var(--border);
   background: var(--bg-panel);
+  border-radius: 8px 8px 0 0;
 }
 .logs-header .title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
   font-size: 10px;
   text-transform: uppercase;
   letter-spacing: 0.12em;
   color: var(--fg-muted);
+}
+.logs-header .title .icon {
+  width: 14px;
+  height: 14px;
 }
 .logs-header .path {
   color: var(--fg-dim);
@@ -184,7 +246,7 @@ main {
   padding: 12px 14px;
   white-space: pre-wrap;
   word-break: break-word;
-  color: #9ca3af;
+  color: #a1a1aa;
 }
 #logs .empty {
   color: var(--fg-dim);
@@ -199,12 +261,18 @@ footer {
   font-size: 11px;
   display: flex;
   justify-content: space-between;
+  align-items: center;
+}
+footer .icon {
+  width: 12px;
+  height: 12px;
+  margin-right: 6px;
 }
 </style>
 </head>
 <body>
 <header>
-  <div class="brand"><span class="mark">hive</span><span class="cursor"></span></div>
+  <div class="brand"><span class="mark"><span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l8.66 5v10L12 22l-8.66-5V7L12 2z"/></svg></span>hive</span><span class="cursor"></span></div>
   <div class="app-meta">
     <span id="app-name" class="app-name">—</span>
     <span id="disconnected">disconnected</span>
@@ -234,12 +302,12 @@ footer {
     </div>
   </div>
   <div class="logs-wrap">
-    <div class="logs-header"><span class="title">Logs</span><span id="log-path" class="path"></span></div>
+    <div class="logs-header"><span class="title"><span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><line x1="10" y1="9" x2="8" y2="9"/></svg></span>Logs</span><span id="log-path" class="path"></span></div>
     <pre id="logs"><span class="empty">no logs yet</span></pre>
   </div>
 </main>
 <footer>
-  <span>polls every 2s · local-only view</span>
+  <span><span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg></span>polls every 2s · local-only view</span>
   <span id="last-refresh">—</span>
 </footer>
 <script>
@@ -270,6 +338,36 @@ logsEl.addEventListener('scroll', () => {
   const nearBottom = logsEl.scrollHeight - logsEl.scrollTop - logsEl.clientHeight < 20;
   logsFollow = nearBottom;
 });
+
+function icon(name) {
+  const paths = {
+    server: '<rect x="2" y="3" width="20" height="8" rx="2" ry="2"/><rect x="2" y="13" width="20" height="8" rx="2" ry="2"/><line x1="6" y1="7" x2="6.01" y2="7"/><line x1="6" y1="17" x2="6.01" y2="17"/>',
+    container: '<path d="M3 6h18M3 12h18M3 18h18"/>',
+    terminal: '<polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/>',
+    'check-circle': '<path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/>',
+    'x-circle': '<circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/>',
+    'alert-triangle': '<path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>',
+    globe: '<circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>',
+    'external-link': '<path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/>',
+  };
+  return '<span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' + (paths[name] || '') + '</svg></span>';
+}
+
+function statusPill(tone, text) {
+  const icons = {
+    running: 'check-circle',
+    ok: 'check-circle',
+    down: 'x-circle',
+    unhealthy: 'x-circle',
+    unknown: 'alert-triangle',
+  };
+  return '<span class="status-pill ' + tone + '">' + icon(icons[tone] || 'alert-triangle') + '<span class="dot"></span><span>' + escapeHtml(text) + '</span></span>';
+}
+
+function backendPill(backend) {
+  const name = backend === 'docker' ? 'container' : 'terminal';
+  return '<span class="backend-pill">' + icon(name) + '<span>' + escapeHtml(backend || '—') + '</span></span>';
+}
 
 function setValue(el, value, tone) {
   el.textContent = value ?? '—';
@@ -320,12 +418,12 @@ function renderFleet(data) {
     const tr = document.createElement('tr');
     if (app.Name === activeAppName) tr.classList.add('active');
     tr.innerHTML = `
-      <td>${escapeHtml(app.Name || '—')}</td>
+      <td><span class="backend-pill row-icon">` + icon('server') + `</span> ${escapeHtml(app.Name || '—')}</td>
       <td>${hive.port || '—'}</td>
       <td>${escapeHtml(item.server || hive.server || '—')}</td>
-      <td>${escapeHtml(st.backend || '—')}</td>
-      <td class="${toneForRunning(st)}">${st.running ? 'running' : 'down'}</td>
-      <td class="${toneForHealth(st)}">${st.running ? (st.healthy ? 'ok' : 'unhealthy') : '—'}</td>
+      <td>${backendPill(st.backend)}</td>
+      <td>${statusPill(toneForRunning(st), st.running ? 'running' : 'down')}</td>
+      <td>${st.running ? statusPill(toneForHealth(st), st.healthy ? 'ok' : 'unhealthy') : statusPill('unknown', '—')}</td>
       <td>${escapeHtml(st.version || 'unknown')}</td>
     `;
     tr.addEventListener('click', () => {
