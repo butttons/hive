@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 )
@@ -8,7 +9,7 @@ import (
 type command struct {
 	name    string
 	summary string
-	run     func(args []string) error
+	run     func(context.Context, []string) error
 }
 
 var commands = []command{
@@ -46,7 +47,7 @@ func main() {
 	}
 	for _, c := range commands {
 		if c.name == name {
-			if err := c.run(os.Args[2:]); err != nil {
+			if err := c.run(context.Background(), os.Args[2:]); err != nil {
 				fmt.Fprintf(os.Stderr, "hive %s: %v\n", name, err)
 				os.Exit(1)
 			}
