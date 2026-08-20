@@ -90,7 +90,7 @@ Every command takes `--json` and prints machine-readable output. Agents are the 
 | `hive status` | `--local`, `--filter` | App config + node state; from a workspace root, show a compact fleet table |
 | `hive ui` | — | Local dashboard; fleet view from a workspace root, single-app view from an app dir |
 | `hive init` | `--bucket`, `--access-key`, `--secret-key`, `--endpoint`, `--region`, `--jurisdiction`, `--force` | Provision bucket credentials into `~/.config/hive/<app>.env` (0600) |
-| `hive env` | `--json`, `--tunnel` | Print the app's effective env vars, shell-sourcable — `hive env --tunnel > .env` feeds docker compose or CI secrets |
+| `hive env` | `--json`, `--tunnel`, `--name` | Print the app's effective env vars, shell-sourcable — `hive env --tunnel > .env` feeds docker compose or CI secrets |
 | `hive bootstrap` | — | Install hive + celld at `~/.local/bin` on the app's server (idempotent) |
 | `hive cf login` | `--status`, `--export`, `--no-browser` | Cloudflare OAuth consent (PKCE); stores a refreshable token |
 | `hive cf tunnel` | `--name`, `--ssh` | Create/sync a remotely-managed Cloudflare Tunnel: ingress rules + DNS, prints the box install command |

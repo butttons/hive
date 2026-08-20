@@ -81,7 +81,7 @@ All implemented and verified live. User-facing reference: README.md / hive.buttt
 - **Only ONE node per prefix may run.** Two nodes → `DurableObjectRoutingError: owner unreachable`. `hive down --local` before testing remote.
 - The bucket is the administrative authority (deployments, replicas, ownership, leases, peer secret). Credentials = full fleet control.
 - Store requirements: conditional writes + read-after-write consistency. R2/S3/Tigris qualify; B2/MinIO/Spaces do not.
-- Nodes need `esbuild` on PATH for deploys. Verified at celld v0.2.1.
+- Nodes need `esbuild` on PATH for deploys. Verified at celld v0.3.0.
 - Operator API (`/state`, `POST /shutdown`) is alpha and version-locked — build against it loosely.
 - `celld deploy` prints `Current Version ID: <16-hex>`; `hive deploy --json` surfaces it as `"version"`.
 - TS wrinkle: use non-generic `DurableObjectNamespace` unless extending `DurableObject` from `cloudflare:workers`.
