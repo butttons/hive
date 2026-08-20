@@ -264,9 +264,9 @@ func upsertTunnelCNAME(ctx context.Context, zoneID, hostname, tunnelID string) (
 	return true, nil
 }
 
-func cmdTunnel(ctx context.Context, args []string) error {
+func cmdCFTunnel(ctx context.Context, args []string) error {
 	args = normalizeFlags(args, map[string]bool{"name": true})
-	fs := flag.NewFlagSet("tunnel", flag.ContinueOnError)
+	fs := flag.NewFlagSet("cf tunnel", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	jsonFlag := fs.Bool("json", false, "")
 	name := fs.String("name", "hive", "tunnel name")
@@ -358,6 +358,6 @@ func cmdTunnel(ctx context.Context, args []string) error {
 		fmt.Printf("dns: %s already points at the tunnel\n", app.Hive.Domain)
 	}
 	fmt.Println("install on the box with: cloudflared service install <token>")
-	fmt.Println("token: run `hive tunnel --json` (keep it secret)")
+	fmt.Println("token: run `hive cf tunnel --json` (keep it secret)")
 	return nil
 }

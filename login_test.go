@@ -56,8 +56,8 @@ func TestLoadTokenMissing(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for missing token")
 	}
-	if !strings.Contains(err.Error(), "run hive login") {
-		t.Fatalf("error should point at hive login: %v", err)
+	if !strings.Contains(err.Error(), "run hive cf login") {
+		t.Fatalf("error should point at hive cf login: %v", err)
 	}
 }
 

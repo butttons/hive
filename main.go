@@ -14,14 +14,12 @@ type command struct {
 
 var commands = []command{
 	{"add", "Scaffold a new celld app in the current directory", cmdAdd},
-	{"check", "Report whether this project can deploy to celld", cmdCheck},
 	{"deploy", "Build, ship to the fleet bucket, restart the node, wait for healthy", cmdDeploy},
 	{"up", "Start the node for this app (process, or docker with --docker)", cmdUp},
 	{"down", "Stop the node gracefully", cmdDown},
 	{"status", "Show what is running, which version, and health", cmdStatus},
 	{"init", "Configure bucket credentials for this project", cmdInit},
-	{"login", "Authorize with Cloudflare via OAuth consent", cmdLogin},
-	{"tunnel", "Manage the Cloudflare Tunnel ingress for this fleet", cmdTunnel},
+	{"cf", "Cloudflare commands: login, tunnel", cmdCF},
 	{"ui", "Serve the local fleet dashboard", cmdUI},
 }
 

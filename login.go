@@ -57,9 +57,9 @@ func redirectURI() string {
 	return fmt.Sprintf("http://%s:%s%s", defaultRedirectHost, loginPort(), defaultRedirectPath)
 }
 
-func cmdLogin(ctx context.Context, args []string) error {
+func cmdCFLogin(ctx context.Context, args []string) error {
 	args = normalizeFlags(args, map[string]bool{})
-	fs := flag.NewFlagSet("login", flag.ContinueOnError)
+	fs := flag.NewFlagSet("cf login", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	jsonFlag := fs.Bool("json", false, "")
 	statusFlag := fs.Bool("status", false, "")
@@ -167,7 +167,7 @@ func runLogin(ctx context.Context, jsonMode, noBrowser, exportMode bool) error {
 		return nil
 	}
 	fmt.Printf("Authorized. Scopes: %s\n", effectiveScope(tr))
-	fmt.Println("Token saved. To use env-var auth instead: hive login --export")
+	fmt.Println("Token saved. To use env-var auth instead: hive cf login --export")
 	return nil
 }
 
@@ -350,7 +350,7 @@ func tokenFilePath() string {
 
 // cfAccessToken resolves the Cloudflare credential. CLOUDFLARE_API_TOKEN in
 // the environment is the source of truth; the OAuth token file written by
-// hive login is the fallback for users who went through the consent flow.
+// hive cf login is the fallback for users who went through the consent flow.
 func cfAccessToken(ctx context.Context) (string, error) {
 	if v := os.Getenv("CLOUDFLARE_API_TOKEN"); v != "" {
 		return v, nil
@@ -400,7 +400,7 @@ func loadToken(ctx context.Context) (*token, error) {
 	b, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, fmt.Errorf("not logged in to Cloudflare: run hive login")
+			return nil, fmt.Errorf("not logged in to Cloudflare: run hive cf login")
 		}
 		return nil, fmt.Errorf("read token file: %w", err)
 	}
@@ -412,11 +412,11 @@ func loadToken(ctx context.Context) (*token, error) {
 		return &tok, nil
 	}
 	if tok.RefreshToken == "" {
-		return nil, fmt.Errorf("token expired and no refresh token available: run hive login")
+		return nil, fmt.Errorf("token expired and no refresh token available: run hive cf login")
 	}
 	tr, err := refreshAccessToken(ctx, tok.RefreshToken)
 	if err != nil {
-		return nil, fmt.Errorf("refresh token failed: %w; run hive login", err)
+		return nil, fmt.Errorf("refresh token failed: %w; run hive cf login", err)
 	}
 	tok = token{
 		AccessToken:  tr.AccessToken,
