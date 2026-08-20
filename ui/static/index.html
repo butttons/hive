@@ -117,6 +117,40 @@ main {
 .cell .value.down, .cell .value.unhealthy {
   color: var(--red);
 }
+.fleet-wrap {
+  border: 1px solid var(--border);
+  background: var(--bg-panel);
+  overflow-x: auto;
+}
+.fleet-wrap table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.fleet-wrap th, .fleet-wrap td {
+  padding: 10px 12px;
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+.fleet-wrap th {
+  color: var(--fg-muted);
+  text-transform: uppercase;
+  font-size: 10px;
+  letter-spacing: 0.1em;
+}
+.fleet-wrap tr:last-child td {
+  border-bottom: none;
+}
+.fleet-wrap td {
+  cursor: pointer;
+}
+.fleet-wrap tr:hover td {
+  background: rgba(255,255,255,0.02);
+}
+.fleet-wrap .active td {
+  background: rgba(74, 222, 128, 0.06);
+}
 .logs-wrap {
   flex: 1;
   display: flex;
@@ -177,15 +211,27 @@ footer {
   </div>
 </header>
 <main>
-  <div class="grid">
-    <div class="cell"><label>Node</label><div id="st-node" class="value unknown">—</div></div>
-    <div class="cell"><label>PID</label><div id="st-pid" class="value unknown">—</div></div>
-    <div class="cell"><label>Backend</label><div id="st-backend" class="value unknown">—</div></div>
-    <div class="cell"><label>Health</label><div id="st-health" class="value unknown">—</div></div>
-    <div class="cell"><label>Port</label><div id="st-port" class="value">—</div></div>
-    <div class="cell"><label>Domain</label><div id="st-domain" class="value unknown">—</div></div>
-    <div class="cell"><label>Server</label><div id="st-server" class="value unknown">—</div></div>
-    <div class="cell"><label>Version</label><div id="st-version" class="value unknown">—</div></div>
+  <div id="single-view">
+    <div class="grid">
+      <div class="cell"><label>Node</label><div id="st-node" class="value unknown">—</div></div>
+      <div class="cell"><label>PID</label><div id="st-pid" class="value unknown">—</div></div>
+      <div class="cell"><label>Backend</label><div id="st-backend" class="value unknown">—</div></div>
+      <div class="cell"><label>Health</label><div id="st-health" class="value unknown">—</div></div>
+      <div class="cell"><label>Port</label><div id="st-port" class="value">—</div></div>
+      <div class="cell"><label>Domain</label><div id="st-domain" class="value unknown">—</div></div>
+      <div class="cell"><label>Server</label><div id="st-server" class="value unknown">—</div></div>
+      <div class="cell"><label>Version</label><div id="st-version" class="value unknown">—</div></div>
+    </div>
+  </div>
+  <div id="fleet-view" style="display:none;">
+    <div class="fleet-wrap">
+      <table>
+        <thead>
+          <tr><th>Name</th><th>Port</th><th>Server</th><th>Backend</th><th>Node</th><th>Health</th><th>Version</th></tr>
+        </thead>
+        <tbody id="fleet-body"></tbody>
+      </table>
+    </div>
   </div>
   <div class="logs-wrap">
     <div class="logs-header"><span class="title">Logs</span><span id="log-path" class="path"></span></div>
@@ -199,6 +245,9 @@ footer {
 <script>
 const appNameEl = document.getElementById('app-name');
 const disconnectedEl = document.getElementById('disconnected');
+const singleViewEl = document.getElementById('single-view');
+const fleetViewEl = document.getElementById('fleet-view');
+const fleetBodyEl = document.getElementById('fleet-body');
 const els = {
   node: document.getElementById('st-node'),
   pid: document.getElementById('st-pid'),
@@ -214,6 +263,9 @@ const logPathEl = document.getElementById('log-path');
 const lastRefreshEl = document.getElementById('last-refresh');
 
 let logsFollow = true;
+let fleetApps = [];
+let activeAppName = null;
+
 logsEl.addEventListener('scroll', () => {
   const nearBottom = logsEl.scrollHeight - logsEl.scrollTop - logsEl.clientHeight < 20;
   logsFollow = nearBottom;
@@ -234,6 +286,62 @@ function toneForHealth(st) {
   return st.healthy ? 'ok' : 'unhealthy';
 }
 
+function renderSingle(data) {
+  singleViewEl.style.display = 'block';
+  fleetViewEl.style.display = 'none';
+
+  const app = data.app || {};
+  const hive = app.Hive || {};
+  appNameEl.textContent = app.Name || '—';
+  logPathEl.textContent = (app.Dir || '') + '/.hive/node.log';
+
+  const st = data.node || {};
+  setValue(els.node, st.running ? 'running' : 'down', toneForRunning(st));
+  setValue(els.pid, st.pid || '—', st.pid ? '' : 'unknown');
+  setValue(els.backend, st.backend || '—', st.backend ? '' : 'unknown');
+  setValue(els.health, st.running ? (st.healthy ? 'ok' : 'unhealthy') : '—', toneForHealth(st));
+  setValue(els.port, hive.port || '—');
+  setValue(els.domain, hive.domain || '—', hive.domain ? '' : 'unknown');
+  setValue(els.server, data.server || hive.server || '—', (data.server || hive.server) ? '' : 'unknown');
+  setValue(els.version, st.version || 'unknown', st.version ? '' : 'unknown');
+}
+
+function renderFleet(data) {
+  singleViewEl.style.display = 'none';
+  fleetViewEl.style.display = 'block';
+  fleetApps = data.apps || [];
+  appNameEl.textContent = `fleet (${fleetApps.length} apps)`;
+
+  fleetBodyEl.innerHTML = '';
+  for (const item of fleetApps) {
+    const app = item.app || {};
+    const hive = app.Hive || {};
+    const st = item.node || {};
+    const tr = document.createElement('tr');
+    if (app.Name === activeAppName) tr.classList.add('active');
+    tr.innerHTML = `
+      <td>${escapeHtml(app.Name || '—')}</td>
+      <td>${hive.port || '—'}</td>
+      <td>${escapeHtml(item.server || hive.server || '—')}</td>
+      <td>${escapeHtml(st.backend || '—')}</td>
+      <td class="${toneForRunning(st)}">${st.running ? 'running' : 'down'}</td>
+      <td class="${toneForHealth(st)}">${st.running ? (st.healthy ? 'ok' : 'unhealthy') : '—'}</td>
+      <td>${escapeHtml(st.version || 'unknown')}</td>
+    `;
+    tr.addEventListener('click', () => {
+      activeAppName = app.Name;
+      logPathEl.textContent = (app.Dir || '') + '/.hive/node.log';
+      fetchLogs();
+      renderFleet(data);
+    });
+    fleetBodyEl.appendChild(tr);
+  }
+  if (!activeAppName && fleetApps.length > 0) {
+    activeAppName = fleetApps[0].app.Name;
+    logPathEl.textContent = (fleetApps[0].app.Dir || '') + '/.hive/node.log';
+  }
+}
+
 async function fetchStatus() {
   try {
     const res = await fetch('/api/status');
@@ -241,20 +349,11 @@ async function fetchStatus() {
     const data = await res.json();
     disconnectedEl.style.display = 'none';
 
-    const app = data.app || {};
-    const hive = app.Hive || {};
-    appNameEl.textContent = app.Name || '—';
-    logPathEl.textContent = (app.Dir || '') + '/.hive/node.log';
-
-    const st = data.node || {};
-    setValue(els.node, st.running ? 'running' : 'down', toneForRunning(st));
-    setValue(els.pid, st.pid || '—', st.pid ? '' : 'unknown');
-    setValue(els.backend, st.backend || '—', st.backend ? '' : 'unknown');
-    setValue(els.health, st.running ? (st.healthy ? 'ok' : 'unhealthy') : '—', toneForHealth(st));
-    setValue(els.port, hive.port || '—');
-    setValue(els.domain, hive.domain || '—', hive.domain ? '' : 'unknown');
-    setValue(els.server, data.server || hive.server || '—', (data.server || hive.server) ? '' : 'unknown');
-    setValue(els.version, st.version || 'unknown', st.version ? '' : 'unknown');
+    if (data.apps) {
+      renderFleet(data);
+    } else {
+      renderSingle(data);
+    }
   } catch (e) {
     disconnectedEl.style.display = 'inline';
   }
@@ -262,7 +361,9 @@ async function fetchStatus() {
 
 async function fetchLogs() {
   try {
-    const res = await fetch('/api/logs');
+    let url = '/api/logs';
+    if (activeAppName) url += '?app=' + encodeURIComponent(activeAppName);
+    const res = await fetch(url);
     if (!res.ok) throw new Error('logs ' + res.status);
     const text = await res.text();
     if (!text) {

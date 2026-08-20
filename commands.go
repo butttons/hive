@@ -12,311 +12,162 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
-	"slices"
 	"strings"
 	"syscall"
 	"time"
 )
 
-func cmdCheck(ctx context.Context, args []string) error {
-	args = normalizeFlags(args, map[string]bool{})
-	fs := flag.NewFlagSet("check", flag.ContinueOnError)
-	fs.SetOutput(io.Discard)
-	jsonFlag := fs.Bool("json", false, "")
-	if err := fs.Parse(args); err != nil {
-		return fmt.Errorf("parse flags: %w", err)
-	}
-
-	start := time.Now()
-	app, err := loadCwdApp()
-	if err != nil {
-		return err
-	}
-
-	steps, ok := runChecks(ctx, app, *jsonFlag)
-	printCheckResult(app, steps, start, *jsonFlag)
-	if !ok {
-		return fmt.Errorf("check failed")
-	}
-	return nil
-}
-
-// celldLegalKeys is the allowlist from celld's wrangler.jsonc parser.
-// Derived from crates/celld/deploy.rs SUPPORTED_KEYS at celld v0.2.1.
-var celldLegalKeys = map[string]bool{
-	"$schema":             true,
-	"name":                true,
-	"main":                true,
-	"compatibility_date":  true,
-	"compatibility_flags": true,
-	"durable_objects":     true,
-	"migrations":          true,
-	"assets":              true,
-	"services":            true,
-	"vars":                true,
-	"no_bundle":           true,
-}
-
-// hiveOnlyKeys are wrangler.jsonc keys that celld rejects and that belong in
-// package.json's "hive" block instead.
-var hiveOnlyKeys = map[string]bool{
-	"routes": true,
-	"port":   true,
-	"domain": true,
-}
-
-type checkStep struct {
-	Name       string `json:"name"`
-	OK         bool   `json:"ok"`
-	Skipped    bool   `json:"skipped,omitempty"`
-	Error      string `json:"error,omitempty"`
-	Detail     string `json:"detail,omitempty"`
-	DurationMs int64  `json:"duration_ms"`
-}
-
-type checkResult struct {
-	App        string      `json:"app"`
-	OK         bool        `json:"ok"`
-	Checks     []checkStep `json:"checks"`
-	DurationMs int64       `json:"duration_ms"`
-}
-
-func runChecks(ctx context.Context, app *App, jsonMode bool) ([]checkStep, bool) {
-	var steps []checkStep
-	overall := true
-
-	st := startStep("config")
-	wranglerPath := filepath.Join(app.Dir, "wrangler.jsonc")
-	config, err := readWranglerObject(wranglerPath)
-	if err != nil {
-		steps = append(steps, checkStep{Name: st.name, OK: false, Error: err.Error(), DurationMs: time.Since(st.start).Milliseconds()})
-		return steps, false
-	}
-	name, _ := config["name"].(string)
-	main, _ := config["main"].(string)
-	if name == "" {
-		steps = append(steps, checkStep{Name: st.name, OK: false, Error: "wrangler.jsonc: missing \"name\"", DurationMs: time.Since(st.start).Milliseconds()})
-		overall = false
-	} else if main == "" {
-		steps = append(steps, checkStep{Name: st.name, OK: false, Error: "wrangler.jsonc: missing \"main\"", DurationMs: time.Since(st.start).Milliseconds()})
-		overall = false
-	} else {
-		steps = append(steps, checkStep{Name: st.name, OK: true, Detail: fmt.Sprintf("name=%s main=%s", name, main), DurationMs: time.Since(st.start).Milliseconds()})
-	}
-
-	st = startStep("keys")
-	var illegal []string
-	var shouldBeHive []string
-	for k := range config {
-		if !celldLegalKeys[k] {
-			illegal = append(illegal, k)
-			if hiveOnlyKeys[k] {
-				shouldBeHive = append(shouldBeHive, k)
-			}
-		}
-	}
-	slices.Sort(illegal)
-	slices.Sort(shouldBeHive)
-	if len(illegal) > 0 {
-		msg := fmt.Sprintf("celld does not support these config keys: %s", strings.Join(illegal, ", "))
-		if len(shouldBeHive) > 0 {
-			msg += fmt.Sprintf(". Move %s to package.json's \"hive\" block", strings.Join(shouldBeHive, ", "))
-		}
-		steps = append(steps, checkStep{Name: st.name, OK: false, Error: msg, DurationMs: time.Since(st.start).Milliseconds()})
-		overall = false
-	} else {
-		steps = append(steps, checkStep{Name: st.name, OK: true, DurationMs: time.Since(st.start).Milliseconds()})
-	}
-
-	st = startStep("files")
-	mainPath := filepath.Join(app.Dir, main)
-	if _, err := os.Stat(mainPath); err != nil {
-		steps = append(steps, checkStep{Name: st.name, OK: false, Error: fmt.Sprintf("main entry not found: %s", mainPath), DurationMs: time.Since(st.start).Milliseconds()})
-		overall = false
-	} else {
-		steps = append(steps, checkStep{Name: st.name, OK: true, DurationMs: time.Since(st.start).Milliseconds()})
-	}
-
-	st = startStep("binary")
-	if _, err := celldPath(); err != nil {
-		steps = append(steps, checkStep{Name: st.name, OK: false, Error: err.Error(), DurationMs: time.Since(st.start).Milliseconds()})
-		overall = false
-	} else {
-		steps = append(steps, checkStep{Name: st.name, OK: true, DurationMs: time.Since(st.start).Milliseconds()})
-	}
-
-	st = startStep("typecheck")
-	tsconfigPath := filepath.Join(app.Dir, "tsconfig.json")
-	if _, err := os.Stat(tsconfigPath); os.IsNotExist(err) {
-		steps = append(steps, checkStep{Name: st.name, OK: true, Skipped: true, Detail: "no tsconfig.json", DurationMs: time.Since(st.start).Milliseconds()})
-	} else {
-		if _, err := findTSC(app); err != nil {
-			steps = append(steps, checkStep{Name: st.name, OK: true, Skipped: true, Detail: "tsc not found (run npm install)", DurationMs: time.Since(st.start).Milliseconds()})
-		} else if err := runCheckTypecheck(ctx, app, jsonMode); err != nil {
-			steps = append(steps, checkStep{Name: st.name, OK: false, Error: err.Error(), DurationMs: time.Since(st.start).Milliseconds()})
-			overall = false
-		} else {
-			steps = append(steps, checkStep{Name: st.name, OK: true, DurationMs: time.Since(st.start).Milliseconds()})
-		}
-	}
-
-	st = startStep("bundle")
-	if os.Getenv("CELLD_BUCKET") == "" {
-		steps = append(steps, checkStep{Name: st.name, OK: true, Skipped: true, Detail: "CELLD_BUCKET not set", DurationMs: time.Since(st.start).Milliseconds()})
-	} else {
-		if err := runCelldDryRun(ctx, app, jsonMode); err != nil {
-			steps = append(steps, checkStep{Name: st.name, OK: false, Error: err.Error(), DurationMs: time.Since(st.start).Milliseconds()})
-			overall = false
-		} else {
-			steps = append(steps, checkStep{Name: st.name, OK: true, DurationMs: time.Since(st.start).Milliseconds()})
-		}
-	}
-
-	return steps, overall
-}
-
-func readWranglerObject(path string) (map[string]any, error) {
-	b, err := os.ReadFile(path)
-	if err != nil {
-		return nil, fmt.Errorf("read %s: %w", path, err)
-	}
-	var v map[string]any
-	if err := json.Unmarshal(stripJSONC(b), &v); err != nil {
-		return nil, fmt.Errorf("parse %s: %w", path, err)
-	}
-	return v, nil
-}
-
-func runCheckTypecheck(ctx context.Context, app *App, jsonMode bool) error {
-	_, err := runTypecheck(ctx, app, jsonMode)
-	return err
-}
-
-func runCelldDryRun(ctx context.Context, app *App, jsonMode bool) error {
-	bin, err := celldPath()
-	if err != nil {
-		return err
-	}
-	bucket, err := celldBucketEnv()
-	if err != nil {
-		return err
-	}
-
-	args := []string{
-		"deploy",
-		"--dry-run",
-		"--bucket", bucket + "/" + app.Name,
-	}
-	if ep := os.Getenv("S3_ENDPOINT"); ep != "" {
-		args = append(args, "--endpoint", ep)
-	}
-	if r := os.Getenv("AWS_REGION"); r != "" {
-		args = append(args, "--region", r)
-	}
-
-	var stdout, stderr io.Writer
-	if jsonMode {
-		stdout = os.Stderr
-		stderr = os.Stderr
-	} else {
-		stdout = os.Stdout
-		stderr = os.Stderr
-	}
-
-	cmd := exec.CommandContext(ctx, bin, args...)
-	cmd.Dir = app.Dir
-	cmd.Env = append(os.Environ(), celldEnviron()...)
-	cmd.Stdout = stdout
-	cmd.Stderr = stderr
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("celld deploy --dry-run failed: %w", err)
-	}
-	return nil
-}
-
-func printCheckResult(app *App, steps []checkStep, start time.Time, jsonMode bool) {
-	ok := true
-	for _, s := range steps {
-		if !s.OK {
-			ok = false
-			break
-		}
-	}
-	if jsonMode {
-		res := checkResult{
-			App:        app.Name,
-			OK:         ok,
-			Checks:     steps,
-			DurationMs: time.Since(start).Milliseconds(),
-		}
-		b, err := json.MarshalIndent(res, "", "  ")
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "hive check: marshal result: %v\n", err)
-			return
-		}
-		fmt.Println(string(b))
-		return
-	}
-
-	for _, s := range steps {
-		if s.Skipped {
-			fmt.Printf("%s skipped (%s)\n", s.Name, s.Detail)
-		} else if s.OK {
-			fmt.Printf("%s ok (%dms)\n", s.Name, s.DurationMs)
-		} else {
-			fmt.Printf("%s failed (%dms): %s\n", s.Name, s.DurationMs, s.Error)
-		}
-	}
-	if ok {
-		fmt.Printf("%s can deploy to celld (%dms)\n", app.Name, time.Since(start).Milliseconds())
-	} else {
-		fmt.Printf("%s cannot deploy to celld (%dms)\n", app.Name, time.Since(start).Milliseconds())
-	}
-}
-
 func cmdDeploy(ctx context.Context, args []string) error {
-	args = normalizeFlags(args, map[string]bool{})
+	var packagesFlags stringSlice
+	args = normalizeFlags(args, map[string]bool{"filter": true, "packages": true})
 	fs := flag.NewFlagSet("deploy", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	jsonFlag := fs.Bool("json", false, "")
 	dockerFlag := fs.Bool("docker", false, "")
 	localFlag := fs.Bool("local", false, "")
+	filterFlag := fs.String("filter", "", "")
+	fs.Var(&packagesFlags, "packages", "")
 	if err := fs.Parse(args); err != nil {
 		return fmt.Errorf("parse flags: %w", err)
 	}
 
-	app, err := loadCwdApp()
-	if err != nil {
-		return err
+	target := fs.Arg(0)
+	if target != "" && target != "all" {
+		return fmt.Errorf("unknown deploy target %q (did you mean \"all\"?)", target)
 	}
 
+	cwd, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("get working directory: %w", err)
+	}
+
+	if target == "all" || *filterFlag != "" {
+		root, ok := findWorkspaceRoot(cwd)
+		if !ok {
+			if len(packagesFlags) > 0 {
+				root = cwd
+			} else {
+				return fmt.Errorf("not in a workspace; use --packages or run from a workspace root")
+			}
+		}
+		apps, err := discoverWorkspaceApps(root, packagesFlags)
+		if err != nil {
+			return err
+		}
+		if len(apps) == 0 {
+			return fmt.Errorf("no hive apps found in workspace")
+		}
+		if *filterFlag != "" {
+			app, err := filterApps(apps, *filterFlag)
+			if err != nil {
+				return err
+			}
+			return runDeployAndPrint(ctx, app, *dockerFlag, *localFlag, *jsonFlag)
+		}
+		return deployAll(ctx, apps, *dockerFlag, *localFlag, *jsonFlag)
+	}
+
+	app, err := loadCwdApp()
+	if err != nil {
+		return fmt.Errorf("not in a hive app; use `hive deploy all`, `hive deploy --filter <name>`, or cd into an app")
+	}
+	return runDeployAndPrint(ctx, app, *dockerFlag, *localFlag, *jsonFlag)
+}
+
+func deployAll(ctx context.Context, apps []*App, dockerFlag, localFlag, jsonFlag bool) error {
+	var results []deployResult
+	var failed int
+	start := time.Now()
+	for _, app := range apps {
+		res := runDeploy(ctx, app, dockerFlag, localFlag, jsonFlag)
+		results = append(results, res)
+		if res.Error != "" {
+			failed++
+		}
+	}
+	if jsonFlag {
+		b, err := json.MarshalIndent(results, "", "  ")
+		if err != nil {
+			return fmt.Errorf("marshal results: %w", err)
+		}
+		fmt.Println(string(b))
+	} else {
+		for _, res := range results {
+			if res.Error != "" {
+				fmt.Printf("%s: failed: %s\n", res.App, res.Error)
+			} else {
+				fmt.Printf("%s: deployed %s (%dms)\n", res.App, res.Version, res.DurationMs)
+			}
+		}
+		fmt.Printf("deployed %d/%d apps (%dms)\n", len(apps)-failed, len(apps), time.Since(start).Milliseconds())
+	}
+	if failed > 0 {
+		return fmt.Errorf("%d app(s) failed to deploy", failed)
+	}
+	return nil
+}
+
+func runDeployAndPrint(ctx context.Context, app *App, dockerFlag, localFlag, jsonFlag bool) error {
+	res := runDeploy(ctx, app, dockerFlag, localFlag, jsonFlag)
+	if jsonFlag {
+		b, err := json.MarshalIndent(res, "", "  ")
+		if err != nil {
+			return fmt.Errorf("marshal result: %w", err)
+		}
+		fmt.Println(string(b))
+	} else {
+		for _, s := range res.Steps {
+			if s.Skipped {
+				fmt.Printf("%s skipped\n", s.Name)
+			} else if s.OK {
+				fmt.Printf("%s ok (%dms)\n", s.Name, s.DurationMs)
+			} else {
+				fmt.Printf("%s failed (%dms)\n", s.Name, s.DurationMs)
+			}
+		}
+		if res.Version != "" {
+			fmt.Printf("version: %s\n", res.Version)
+		}
+		if res.Error != "" {
+			return fmt.Errorf("%s", res.Error)
+		}
+		if res.Version != "" {
+			fmt.Printf("deployed %s (%s) in %dms\n", res.App, res.Version, res.DurationMs)
+		} else {
+			fmt.Printf("deployed %s in %dms\n", res.App, res.DurationMs)
+		}
+	}
+	if res.Error != "" {
+		return fmt.Errorf("%s", res.Error)
+	}
+	return nil
+}
+
+func runDeploy(ctx context.Context, app *App, dockerFlag, localFlag, jsonFlag bool) deployResult {
 	start := time.Now()
 	var steps []deployStep
 	var version string
 
 	st := startStep("typecheck")
-	skipped, err := runTypecheck(ctx, app, *jsonFlag)
+	skipped, err := runTypecheck(ctx, app, jsonFlag)
 	if err != nil {
 		steps = append(steps, st.done(false))
-		printDeployResult(app, version, steps, start, *jsonFlag, err)
-		return err
+		return deployResult{App: app.Name, Version: version, Steps: steps, DurationMs: time.Since(start).Milliseconds(), Error: err.Error()}
 	}
 	steps = append(steps, st.doneSkip(skipped))
 
 	st = startStep("deploy")
-	version, err = runCelldDeploy(ctx, app, *jsonFlag)
+	version, err = runCelldDeploy(ctx, app, jsonFlag)
 	if err != nil {
 		steps = append(steps, st.done(false))
-		printDeployResult(app, version, steps, start, *jsonFlag, err)
-		return err
+		return deployResult{App: app.Name, Version: version, Steps: steps, DurationMs: time.Since(start).Milliseconds(), Error: err.Error()}
 	}
 	steps = append(steps, st.done(true))
 
 	st = startStep("restart")
-	if err := restartNode(ctx, app, *dockerFlag, *localFlag, *jsonFlag); err != nil {
+	if err := restartNode(ctx, app, dockerFlag, localFlag, jsonFlag); err != nil {
 		steps = append(steps, st.done(false))
-		printDeployResult(app, version, steps, start, *jsonFlag, err)
-		return err
+		return deployResult{App: app.Name, Version: version, Steps: steps, DurationMs: time.Since(start).Milliseconds(), Error: err.Error()}
 	}
 	steps = append(steps, st.done(true))
 
@@ -326,13 +177,11 @@ func cmdDeploy(ctx context.Context, args []string) error {
 	if ok, msg := waitForHealth(healthCtx, app); !ok {
 		logPath := filepath.Join(app.Dir, ".hive", "node.log")
 		steps = append(steps, st.done(false))
-		printDeployResult(app, version, steps, start, *jsonFlag, nil)
-		return fmt.Errorf("health gate timed out after 30s (see %s): %s", logPath, msg)
+		return deployResult{App: app.Name, Version: version, Steps: steps, DurationMs: time.Since(start).Milliseconds(), Error: fmt.Sprintf("health gate timed out after 30s (see %s): %s", logPath, msg)}
 	}
 	steps = append(steps, st.done(true))
 
-	printDeployResult(app, version, steps, start, *jsonFlag, nil)
-	return nil
+	return deployResult{App: app.Name, Version: version, Steps: steps, DurationMs: time.Since(start).Milliseconds()}
 }
 
 
@@ -472,28 +321,83 @@ func gatherStatus(ctx context.Context, app *App) (statusResult, error) {
 }
 
 func cmdStatus(ctx context.Context, args []string) error {
-	args = normalizeFlags(args, map[string]bool{})
+	var packagesFlags stringSlice
+	args = normalizeFlags(args, map[string]bool{"filter": true, "packages": true})
 	fs := flag.NewFlagSet("status", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	jsonFlag := fs.Bool("json", false, "")
 	localFlag := fs.Bool("local", false, "")
+	filterFlag := fs.String("filter", "", "")
+	fs.Var(&packagesFlags, "packages", "")
 	if err := fs.Parse(args); err != nil {
 		return fmt.Errorf("parse flags: %w", err)
 	}
 
-	app, err := loadCwdApp()
+	cwd, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("get working directory: %w", err)
+	}
+
+	if *filterFlag != "" {
+		app, err := resolveWorkspaceApp(cwd, *filterFlag, packagesFlags)
+		if err != nil {
+			return err
+		}
+		return printSingleStatus(ctx, app, *localFlag, *jsonFlag)
+	}
+
+	app, appErr := loadCwdApp()
+	if appErr == nil {
+		return printSingleStatus(ctx, app, *localFlag, *jsonFlag)
+	}
+
+	root, ok := findWorkspaceRoot(cwd)
+	if !ok {
+		if len(packagesFlags) > 0 {
+			root = cwd
+		} else {
+			return appErr
+		}
+	}
+	apps, err := discoverWorkspaceApps(root, packagesFlags)
 	if err != nil {
 		return err
 	}
-	if app.Hive.Server != "" && !*localFlag {
-		return remoteHive(app.Hive.Server, app.Dir, "status", append(fs.Args(), "--local"))
+	if len(apps) == 0 {
+		return fmt.Errorf("no hive apps found in workspace")
+	}
+	return printFleetStatus(ctx, apps, *localFlag, *jsonFlag)
+}
+
+func resolveWorkspaceApp(cwd, filter string, packagesFlags []string) (*App, error) {
+	root, ok := findWorkspaceRoot(cwd)
+	if !ok {
+		if len(packagesFlags) > 0 {
+			root = cwd
+		} else {
+			return nil, fmt.Errorf("not in a workspace; use --packages or run from a workspace root")
+		}
+	}
+	apps, err := discoverWorkspaceApps(root, packagesFlags)
+	if err != nil {
+		return nil, err
+	}
+	if len(apps) == 0 {
+		return nil, fmt.Errorf("no hive apps found in workspace")
+	}
+	return filterApps(apps, filter)
+}
+
+func printSingleStatus(ctx context.Context, app *App, local, jsonFlag bool) error {
+	if app.Hive.Server != "" && !local {
+		return remoteHive(app.Hive.Server, app.Dir, "status", []string{"--local"})
 	}
 
 	res, err := gatherStatus(ctx, app)
 	if err != nil {
 		return err
 	}
-	if *jsonFlag {
+	if jsonFlag {
 		b, err := json.MarshalIndent(res, "", "  ")
 		if err != nil {
 			return fmt.Errorf("marshal status: %w", err)
@@ -525,6 +429,84 @@ func cmdStatus(ctx context.Context, args []string) error {
 		fmt.Printf("Version:  %s\n", st.Version)
 	}
 	return nil
+}
+
+func printFleetStatus(ctx context.Context, apps []*App, local, jsonFlag bool) error {
+	var results []statusResult
+	for _, app := range apps {
+		results = append(results, gatherStatusForFleet(ctx, app, local))
+	}
+	if jsonFlag {
+		b, err := json.MarshalIndent(results, "", "  ")
+		if err != nil {
+			return fmt.Errorf("marshal fleet status: %w", err)
+		}
+		fmt.Println(string(b))
+		return nil
+	}
+
+	fmt.Printf("%-12s %-6s %-18s %-10s %-10s %s\n", "NAME", "PORT", "SERVER/BACKEND", "NODE", "HEALTH", "VERSION")
+	for _, res := range results {
+		app := res.App
+		st := res.Node
+		serverBackend := "-"
+		if app.Hive.Server != "" || st.Backend != "" {
+			serverBackend = fmt.Sprintf("%s/%s", firstNonEmpty(app.Hive.Server, "-"), st.Backend)
+		}
+		node := map[bool]string{true: "running", false: "down"}[st.Running]
+		health := "-"
+		if st.Running {
+			health = map[bool]string{true: "ok", false: "unhealthy"}[st.Healthy]
+		}
+		version := st.Version
+		if version == "" {
+			version = "-"
+		}
+		fmt.Printf("%-12s %-6d %-18s %-10s %-10s %s\n", app.Name, app.Hive.Port, serverBackend, node, health, version)
+	}
+	return nil
+}
+
+func firstNonEmpty(a, b string) string {
+	if a != "" {
+		return a
+	}
+	return b
+}
+
+func gatherStatusForFleet(ctx context.Context, app *App, local bool) statusResult {
+	if app.Hive.Server != "" && !local {
+		res, err := remoteStatusJSON(app.Hive.Server, app.Dir)
+		if err == nil {
+			return res
+		}
+		return statusResult{App: *app, Server: app.Hive.Server, Node: nodeStatus{Healthy: false, HealthError: err.Error()}}
+	}
+	res, err := gatherStatus(ctx, app)
+	if err != nil {
+		return statusResult{App: *app, Server: app.Hive.Server, Node: nodeStatus{Healthy: false, HealthError: err.Error()}}
+	}
+	return res
+}
+
+func remoteStatusJSON(server, dir string) (statusResult, error) {
+	remoteCmd := fmt.Sprintf("cd %s && ~/.local/bin/hive status --local --json", shellSingleQuote(dir))
+	cmd := exec.Command("ssh", server, remoteCmd)
+	var out, stderr bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		msg := strings.TrimSpace(stderr.String())
+		if msg != "" {
+			return statusResult{}, fmt.Errorf("ssh status: %s", msg)
+		}
+		return statusResult{}, fmt.Errorf("ssh status: %w", err)
+	}
+	var res statusResult
+	if err := json.Unmarshal(out.Bytes(), &res); err != nil {
+		return statusResult{}, fmt.Errorf("parse remote status: %w", err)
+	}
+	return res, nil
 }
 
 func fetchLiveVersion(app *App) string {
@@ -574,48 +556,6 @@ func (s *stepTimer) doneSkip(skipped bool) deployStep {
 		return deployStep{Name: s.name, OK: true, Skipped: true, DurationMs: 0}
 	}
 	return s.done(true)
-}
-
-func printDeployResult(app *App, version string, steps []deployStep, start time.Time, jsonMode bool, err error) {
-	if jsonMode {
-		res := deployResult{
-			App:        app.Name,
-			Version:    version,
-			Steps:      steps,
-			DurationMs: time.Since(start).Milliseconds(),
-		}
-		if err != nil {
-			res.Error = err.Error()
-		}
-		b, marshalErr := json.MarshalIndent(res, "", "  ")
-		if marshalErr != nil {
-			fmt.Fprintf(os.Stderr, "hive deploy: marshal result: %v\n", marshalErr)
-			return
-		}
-		fmt.Println(string(b))
-		return
-	}
-
-	for _, s := range steps {
-		if s.Skipped {
-			fmt.Printf("%s skipped\n", s.Name)
-		} else if s.OK {
-			fmt.Printf("%s ok (%dms)\n", s.Name, s.DurationMs)
-		} else {
-			fmt.Printf("%s failed (%dms)\n", s.Name, s.DurationMs)
-		}
-	}
-	if version != "" {
-		fmt.Printf("version: %s\n", version)
-	}
-	if err != nil {
-		return
-	}
-	if version != "" {
-		fmt.Printf("deployed %s (%s) in %dms\n", app.Name, version, time.Since(start).Milliseconds())
-	} else {
-		fmt.Printf("deployed %s in %dms\n", app.Name, time.Since(start).Milliseconds())
-	}
 }
 
 func findTSC(app *App) (string, error) {

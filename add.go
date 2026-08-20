@@ -139,6 +139,19 @@ func reservedPorts(root string) (map[int]bool, error) {
 	}
 	check(root)
 
+	if hasPnpmWorkspace(root) || hasPackageWorkspaces(filepath.Join(root, "package.json")) {
+		apps, err := discoverWorkspaceApps(root, nil)
+		if err != nil {
+			return nil, fmt.Errorf("discover workspace apps: %w", err)
+		}
+		for _, app := range apps {
+			if app.Hive.Port != 0 {
+				used[app.Hive.Port] = true
+			}
+		}
+		return used, nil
+	}
+
 	entries, err := os.ReadDir(root)
 	if err != nil {
 		return nil, fmt.Errorf("read directory %s: %w", root, err)

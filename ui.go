@@ -22,18 +22,49 @@ import (
 var indexHTML []byte
 
 func cmdUI(ctx context.Context, args []string) error {
-	args = normalizeFlags(args, map[string]bool{"port": true})
+	var packagesFlags stringSlice
+	args = normalizeFlags(args, map[string]bool{"port": true, "filter": true, "packages": true})
 	fs := flag.NewFlagSet("ui", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	portFlag := fs.Int("port", 8977, "")
 	noBrowserFlag := fs.Bool("no-browser", false, "")
+	filterFlag := fs.String("filter", "", "")
+	fs.Var(&packagesFlags, "packages", "")
 	if err := fs.Parse(args); err != nil {
 		return fmt.Errorf("parse flags: %w", err)
 	}
 
-	app, err := loadCwdApp()
+	cwd, err := os.Getwd()
 	if err != nil {
-		return err
+		return fmt.Errorf("get working directory: %w", err)
+	}
+
+	var apps []*App
+	var singleApp *App
+	if *filterFlag != "" {
+		singleApp, err = resolveWorkspaceApp(cwd, *filterFlag, packagesFlags)
+		if err != nil {
+			return err
+		}
+	} else {
+		singleApp, err = loadCwdApp()
+		if err != nil {
+			root, ok := findWorkspaceRoot(cwd)
+			if !ok {
+				if len(packagesFlags) > 0 {
+					root = cwd
+				} else {
+					return err
+				}
+			}
+			apps, err = discoverWorkspaceApps(root, packagesFlags)
+			if err != nil {
+				return err
+			}
+			if len(apps) == 0 {
+				return fmt.Errorf("no hive apps found in workspace")
+			}
+		}
 	}
 
 	addr := fmt.Sprintf("127.0.0.1:%d", *portFlag)
@@ -48,24 +79,56 @@ func cmdUI(ctx context.Context, args []string) error {
 		w.Write(indexHTML)
 	})
 	mux.HandleFunc("GET /api/status", func(w http.ResponseWriter, r *http.Request) {
-		res, err := gatherStatus(r.Context(), app)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+		if singleApp != nil {
+			res, err := gatherStatus(r.Context(), singleApp)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			enc := json.NewEncoder(w)
+			enc.SetIndent("", "  ")
+			_ = enc.Encode(res)
 			return
+		}
+		var results []statusResult
+		for _, app := range apps {
+			results = append(results, gatherStatusForFleet(r.Context(), app, false))
 		}
 		w.Header().Set("Content-Type", "application/json")
 		enc := json.NewEncoder(w)
 		enc.SetIndent("", "  ")
-		_ = enc.Encode(res)
+		_ = enc.Encode(map[string]any{"apps": results})
 	})
 	mux.HandleFunc("GET /api/logs", func(w http.ResponseWriter, r *http.Request) {
+		app := singleApp
+		if app == nil && len(apps) > 0 {
+			name := r.URL.Query().Get("app")
+			for _, a := range apps {
+				if a.Name == name {
+					app = a
+					break
+				}
+			}
+			if app == nil {
+				app = apps[0]
+			}
+		}
+		if app == nil {
+			http.Error(w, "no app", http.StatusNotFound)
+			return
+		}
 		serveLogs(w, app)
 	})
 
 	srv := &http.Server{Addr: addr, Handler: mux}
 
 	url := "http://" + addr
-	fmt.Printf("hive ui for %s at %s\n", app.Name, url)
+	if singleApp != nil {
+		fmt.Printf("hive ui for %s at %s\n", singleApp.Name, url)
+	} else {
+		fmt.Printf("hive fleet ui (%d apps) at %s\n", len(apps), url)
+	}
 	if !*noBrowserFlag {
 		openBrowser(url)
 	}
