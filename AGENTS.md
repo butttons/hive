@@ -103,8 +103,9 @@ Two files per app project, same directory:
 
 ## Test environments (live)
 
-- **playground** at `~/Work/playground` — the consumer/test apps. Has its own AGENTS.md. R2 bucket `old-bucket` (EU endpoint, `AWS_REGION=auto`), creds in `env.sh` (source it; never copy creds elsewhere). Apps: `counter` (port 8101, SQLite counter DO) and `wsecho` (port 8102, hibernatable WS DO), TS, deployable via `scripts/deploy.sh`. `counter/package.json` now has a `"hive"` block; `wsecho` does not yet.
-- **remote box** — `user@box`, SSH key auth confirmed working, macOS 26.4.1 arm64, cloudflared NOT installed yet (`brew install cloudflared`). First launchd-backend and tunnel target. Stand-in for "barebones box."
+- **playground** at `~/Work/playground` — the hive playground monorepo (npm workspaces, `apps/*`). Has its own AGENTS.md. Bucket `mybucket` (default jurisdiction), per-app creds in `~/.config/hive/<app>.env` via `hive init`. Apps: `counter` (port 8101, domain counter.example.com, server user@box) and `wsecho` (port 8102). The old `old-bucket` bucket (other CF account) was purged; `env.sh` there keeps those creds alive only as an archive.
+- **remote box** — `user@box`, SSH key auth confirmed working, macOS 26.4.1 arm64. hive + celld binaries installed at `~/.local/bin`. Needs docker for the docker backend. First remote target.
+- Cloudflare: OAuth client `d6188eb87e7198f8f9fd8ef81abc6539` on account `00000000000000000000000000000000`. The `hive` tunnel and `counter.example.com` record were created, verified live, then deleted during cleanup — recreate with `hive tunnel`.
 
 ## Current state
 
