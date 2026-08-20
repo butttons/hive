@@ -5,3 +5,4 @@ AGENTS.local.md
 .wrangler
 .playwright-cli
 .pi
+.DS_Store
