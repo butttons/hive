@@ -90,6 +90,7 @@ Every command takes `--json` and prints machine-readable output. Agents are the 
 | `hive status` | `--local`, `--filter` | App config + node state; from a workspace root, show a compact fleet table |
 | `hive ui` | — | Local dashboard; fleet view from a workspace root, single-app view from an app dir |
 | `hive init` | `--bucket`, `--access-key`, `--secret-key`, `--endpoint`, `--region`, `--jurisdiction`, `--force` | Provision bucket credentials into `~/.config/hive/<app>.env` (0600) |
+| `hive env` | `--json`, `--tunnel` | Print the app's effective env vars, shell-sourcable — `hive env --tunnel > .env` feeds docker compose or CI secrets |
 | `hive bootstrap` | — | Install hive + celld at `~/.local/bin` on the app's server (idempotent) |
 | `hive cf login` | `--status`, `--export`, `--no-browser` | Cloudflare OAuth consent (PKCE); stores a refreshable token |
 | `hive cf tunnel` | `--name`, `--ssh` | Create/sync a remotely-managed Cloudflare Tunnel: ingress rules + DNS, prints the box install command |
@@ -114,6 +115,8 @@ Self-managed Cloudflare OAuth (authorization code + PKCE, no client secret). Def
 
 - **process** (default): `celld` as a detached process, logs to `.hive/node.log`, `down` = SIGTERM (celld drains gracefully). Zero moving parts; no supervisor — a reboot leaves the node down until the next `hive up`.
 - **docker** (`--docker` or `"backend": "docker"`): node runs as container `hive-<app>` from image `hive/celld:<version>` (built on demand from the official celld release binary), published on `127.0.0.1:<port>`, `--restart unless-stopped`, config drift detected by a label hash → recreate. `docker stop` is the same graceful drain.
+
+Prefer to supervise the containers yourself (compose, Coolify)? `examples/docker-compose.yml` runs a node from the official `ghcr.io/denoland/celld` image plus a cloudflared sidecar; `hive env --tunnel > .env` generates its credentials, and deploys become `hive deploy --no-restart && docker compose restart <app>`.
 
 One node per fleet bucket prefix, ever. Two nodes on the same `s3://bucket/<app>` prefix produce `DurableObjectRoutingError: owner unreachable`.
 

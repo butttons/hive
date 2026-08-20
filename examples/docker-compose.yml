@@ -1,0 +1,55 @@
+# Example: run a hive app as a docker compose stack — celld node + cloudflared.
+# Works on any docker host (laptop, VM, Coolify). All credentials come from
+# env vars / the .env next to this file — never commit it.
+#
+# Setup, from the app directory:
+#   hive init                      # one-time: bucket credentials
+#   hive cf tunnel                 # one-time: tunnel + DNS (optional; any ingress works)
+#   hive env --tunnel > .env       # credentials for compose (gitignore it)
+#   docker compose up -d
+#
+# Ship an update:
+#   hive deploy --no-restart       # upload only; compose owns the node
+#   docker compose restart app
+#
+# Ingress note: `hive cf tunnel` routes the domain to localhost:<port>. When
+# cloudflared runs inside compose, repoint the ingress at the service name
+# (http://app:8080) — or run cloudflared on the host and keep localhost.
+#
+# More apps: duplicate the app service, change name, port, CELLD_BUCKET suffix.
+
+x-celld: &celld
+  image: ghcr.io/denoland/celld:v0.3.0
+  restart: unless-stopped
+  command: ["--trust-forwarded-headers"]
+  environment: &celld-env
+    CELLD_ADDR: 0.0.0.0:8080
+    CELLD_INTERNAL_ADDR: 127.0.0.1:8081
+    CELLD_WATCH: /data
+    S3_ENDPOINT: ${S3_ENDPOINT}
+    AWS_REGION: ${AWS_REGION}
+    AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
+    AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
+
+services:
+  app: # rename to your app
+    <<: *celld
+    ports:
+      - "127.0.0.1:8080:8080" # match "port" in package.json's hive block
+    volumes:
+      - app-data:/data
+    environment:
+      <<: *celld-env
+      CELLD_BUCKET: ${CELLD_BUCKET}/app # <- your app name
+
+  tunnel: # optional: Cloudflare Tunnel ingress
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: ${TUNNEL_TOKEN} # from hive env --tunnel
+    depends_on:
+      - app
+
+volumes:
+  app-data:

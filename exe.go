@@ -17,25 +17,18 @@ import (
 var exeVMNameRe = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
 
 func cmdExe(ctx context.Context, args []string) error {
-	args = normalizeFlags(args, map[string]bool{})
-	fs := flag.NewFlagSet("exe", flag.ContinueOnError)
-	fs.SetOutput(io.Discard)
-	if err := fs.Parse(args); err != nil {
-		return fmt.Errorf("parse flags: %w", err)
-	}
-	if len(fs.Args()) == 0 {
+	if len(args) == 0 {
 		return fmt.Errorf("usage: hive exe <new|share|domain>")
 	}
-	sub := fs.Args()[0]
-	switch sub {
+	switch args[0] {
 	case "new":
-		return cmdExeNew(ctx, fs.Args()[1:])
+		return cmdExeNew(ctx, args[1:])
 	case "share":
-		return cmdExeShare(ctx, fs.Args()[1:])
+		return cmdExeShare(ctx, args[1:])
 	case "domain":
-		return cmdExeDomain(ctx, fs.Args()[1:])
+		return cmdExeDomain(ctx, args[1:])
 	default:
-		return fmt.Errorf("unknown exe command: %s (available: new, share, domain)", sub)
+		return fmt.Errorf("unknown exe command: %s (available: new, share, domain)", args[0])
 	}
 }
 

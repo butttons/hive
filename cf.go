@@ -2,28 +2,19 @@ package main
 
 import (
 	"context"
-	"flag"
 	"fmt"
-	"io"
 )
 
 func cmdCF(ctx context.Context, args []string) error {
-	args = normalizeFlags(args, map[string]bool{})
-	fs := flag.NewFlagSet("cf", flag.ContinueOnError)
-	fs.SetOutput(io.Discard)
-	if err := fs.Parse(args); err != nil {
-		return fmt.Errorf("parse flags: %w", err)
-	}
-	if len(fs.Args()) == 0 {
+	if len(args) == 0 {
 		return fmt.Errorf("usage: hive cf <login|tunnel>")
 	}
-	sub := fs.Args()[0]
-	switch sub {
+	switch args[0] {
 	case "login":
-		return cmdCFLogin(ctx, fs.Args()[1:])
+		return cmdCFLogin(ctx, args[1:])
 	case "tunnel":
-		return cmdCFTunnel(ctx, fs.Args()[1:])
+		return cmdCFTunnel(ctx, args[1:])
 	default:
-		return fmt.Errorf("unknown cf command: %s (available: login, tunnel)", sub)
+		return fmt.Errorf("unknown cf command: %s (available: login, tunnel)", args[0])
 	}
 }

@@ -1,10 +1,15 @@
 package main
 
 import (
+	"context"
+	"encoding/json"
+	"flag"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 )
 
@@ -120,6 +125,83 @@ func syncAppEnvFile(server string, app *App) error {
 
 func shellSingleQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
+// cmdEnv prints the effective celld environment for the current app:
+// process env overlaid on ~/.config/hive/<app>.env. Output is shell-sourcable
+// (eval "$(hive env)" or redirect into a .env). --tunnel also emits
+// TUNNEL_TOKEN for the app's Cloudflare tunnel (needs cf auth + domain).
+func cmdEnv(ctx context.Context, args []string) error {
+	args = normalizeFlags(args, map[string]bool{"name": true})
+	fs := flag.NewFlagSet("env", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	jsonFlag := fs.Bool("json", false, "")
+	tunnelFlag := fs.Bool("tunnel", false, "also print TUNNEL_TOKEN (needs cf auth and a domain)")
+	name := fs.String("name", "hive", "tunnel name (with --tunnel)")
+	if err := fs.Parse(args); err != nil {
+		return fmt.Errorf("parse flags: %w", err)
+	}
+
+	app, err := loadCwdApp()
+	if err != nil {
+		return err
+	}
+	if err := loadAppEnv(app); err != nil {
+		return err
+	}
+
+	out := make(map[string]string)
+	for _, k := range envFileKeys {
+		if k == "PATH" || k == "HOME" {
+			continue
+		}
+		if v := os.Getenv(k); v != "" {
+			out[k] = v
+		}
+	}
+
+	if *tunnelFlag {
+		if app.Hive.Domain == "" {
+			return fmt.Errorf("no domain in the hive block of %s/package.json", app.Dir)
+		}
+		zone, err := findZone(ctx, app.Hive.Domain)
+		if err != nil {
+			return err
+		}
+		tunnel, err := findTunnel(ctx, zone.Account.ID, *name)
+		if err != nil {
+			return err
+		}
+		if tunnel == nil {
+			return fmt.Errorf("no tunnel %q (run hive cf tunnel first)", *name)
+		}
+		tok, err := tunnelToken(ctx, zone.Account.ID, tunnel.ID)
+		if err != nil {
+			return err
+		}
+		out["TUNNEL_TOKEN"] = tok
+	}
+
+	if len(out) == 0 {
+		return fmt.Errorf("no env vars found (export them, or run hive init)")
+	}
+	if *jsonFlag {
+		b, err := json.MarshalIndent(out, "", "  ")
+		if err != nil {
+			return fmt.Errorf("marshal env: %w", err)
+		}
+		fmt.Println(string(b))
+		return nil
+	}
+	keys := make([]string, 0, len(out))
+	for k := range out {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		fmt.Printf("%s=%s\n", k, shellSingleQuote(out[k]))
+	}
+	return nil
 }
 
 func unquoteShell(s string) string {

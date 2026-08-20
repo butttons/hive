@@ -52,7 +52,7 @@ Two files per app project, same directory:
 
 All implemented and verified live. User-facing reference: README.md / hive.butttons.dev.
 
-- `add` `deploy` `up` `down` `status` `init` `bootstrap` `cf` `exe` `ui`.
+- `add` `deploy` `up` `down` `status` `init` `env` `bootstrap` `cf` `exe` `ui`. `env` prints the effective app env (shell-sourcable; `--tunnel` adds TUNNEL_TOKEN) — feeds compose `.env` and CI secrets.
 - `bootstrap` = install/upgrade hive + celld at `~/.local/bin` on `hive.server` over ssh. The bare-box error path in `deploy`/`up` points at it.
 - `deploy` = typecheck (`tsc -b`) → `celld deploy` → restart node → 30s `/__celld/health` gate. **The restart is the reload** — no watch mode or HMR.
 - Backends behind one interface; `down` is SIGTERM either way (celld drains gracefully). Idempotent; config drift → restart.
