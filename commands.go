@@ -334,7 +334,7 @@ func cmdDeploy(ctx context.Context, args []string) error {
 	printDeployResult(app, version, steps, start, *jsonFlag, nil)
 	return nil
 }
-func cmdUI(ctx context.Context, args []string) error     { return notImplemented("ui") }
+
 
 func loadCwdApp() (*App, error) {
 	cwd, err := os.Getwd()
@@ -453,6 +453,24 @@ type statusResult struct {
 	Node   nodeStatus `json:"node"`
 }
 
+// gatherStatus inspects the local node state for app, returning the same
+// structure used by `hive status --json`.
+func gatherStatus(ctx context.Context, app *App) (statusResult, error) {
+	var st nodeStatus
+	var err error
+	for _, r := range []runner{dockerRunner{}, processRunner{}} {
+		st, err = r.Status(ctx, app)
+		if err == nil && (st.Running || st.PID != 0) {
+			break
+		}
+	}
+	if err != nil {
+		return statusResult{}, err
+	}
+	st.Version = fetchLiveVersion(app)
+	return statusResult{App: *app, Server: app.Hive.Server, Node: st}, nil
+}
+
 func cmdStatus(ctx context.Context, args []string) error {
 	args = normalizeFlags(args, map[string]bool{})
 	fs := flag.NewFlagSet("status", flag.ContinueOnError)
@@ -471,19 +489,10 @@ func cmdStatus(ctx context.Context, args []string) error {
 		return remoteHive(app.Hive.Server, app.Dir, "status", append(fs.Args(), "--local"))
 	}
 
-	var st nodeStatus
-	for _, r := range []runner{dockerRunner{}, processRunner{}} {
-		st, err = r.Status(ctx, app)
-		if err == nil && (st.Running || st.PID != 0) {
-			break
-		}
-	}
+	res, err := gatherStatus(ctx, app)
 	if err != nil {
 		return err
 	}
-	st.Version = fetchLiveVersion(app)
-
-	res := statusResult{App: *app, Server: app.Hive.Server, Node: st}
 	if *jsonFlag {
 		b, err := json.MarshalIndent(res, "", "  ")
 		if err != nil {
@@ -492,6 +501,7 @@ func cmdStatus(ctx context.Context, args []string) error {
 		fmt.Println(string(b))
 		return nil
 	}
+	st := res.Node
 
 	fmt.Printf("App:      %s\n", app.Name)
 	fmt.Printf("Dir:      %s\n", app.Dir)
