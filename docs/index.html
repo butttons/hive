@@ -849,7 +849,7 @@ curl http://127.0.0.1:&lt;port&gt;/</code></pre>
                     </li>
                 </ul>
                 <p>
-                    Supervise containers yourself (compose, Coolify)?
+                    Supervise containers yourself?
                     <a
                         href="https://github.com/butttons/hive/blob/main/examples/docker-compose.yml"
                         ><code>examples/docker-compose.yml</code></a
@@ -955,8 +955,7 @@ hive deploy                 <span class="c"># ship, restart, health-gate — ove
                     </li>
                     <li>
                         <strong>Anything else</strong>: reverse-proxy
-                        <code>127.0.0.1:8101</code> yourself (caddy, nginx,
-                        Coolify below).
+                        <code>127.0.0.1:8101</code> yourself (caddy, nginx, …).
                     </li>
                 </ul>
                 <p>
@@ -998,55 +997,6 @@ hive exe domain           <span class="c"># mybot.example.com live: DNS-only CNA
                     The <code>--private</code> share mode keeps the proxy behind
                     exe.dev login — the right default for internal tools.
                 </p>
-
-                <h3 id="coolify">Coolify</h3>
-                <p>
-                    Coolify replaces hive's node supervision and ingress, not
-                    the deploy pipeline. celld loads
-                    <code>deploy/current.json</code> at startup — the restart is
-                    the reload — and a Coolify redeploy only fires on git push,
-                    not on a bucket write. So the split is: Coolify runs the
-                    container and owns TLS + domain; CI ships the code and
-                    restarts the app.
-                </p>
-                <pre><code><span class="c"># Dockerfile — celld node for Coolify</span>
-FROM debian:stable-slim
-RUN apt-get update &amp;&amp; apt-get install -y --no-install-recommends curl ca-certificates \
- &amp;&amp; rm -rf /var/lib/apt/lists/* \
- &amp;&amp; curl -fsSL https://celld.dev/install.sh | sh
-ENV PATH="/root/.local/bin:$PATH"
-CMD ["celld", "--bucket", "&lt;bucket&gt;/&lt;app&gt;", "--listen", "0.0.0.0:8101", \
-     "--endpoint", "https://&lt;account&gt;.r2.cloudflarestorage.com", "--region", "auto", \
-     "--trust-forwarded-headers"]</code></pre>
-                <p>
-                    Set the S3 credentials (<code>AWS_ACCESS_KEY_ID</code>,
-                    <code>AWS_SECRET_ACCESS_KEY</code>, …) in Coolify's env UI,
-                    assign the domain there, and point its health check at
-                    <code>/__celld/health</code>. Note the
-                    <code>0.0.0.0</code> bind — Coolify's proxy reaches the
-                    container over the docker network, unlike hive's loopback
-                    posture.
-                </p>
-                <pre><code>hive deploy --no-restart                 <span class="c"># upload the new version to the bucket</span>
-curl -X POST "$COOLIFY_DEPLOY_WEBHOOK"   <span class="c"># restart the container so it loads current.json</span></code></pre>
-                <div class="callout warn">
-                    <div class="callout-title">
-                        <svg class="icon" viewBox="0 0 24 24">
-                            <path
-                                d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"
-                            />
-                            <line x1="12" y1="9" x2="12" y2="13" />
-                            <line x1="12" y1="17" x2="12.01" y2="17" /></svg
-                        >Caution
-                    </div>
-                    <p>
-                        Never scale past <strong>1 replica</strong> — two nodes
-                        on one bucket prefix produce
-                        <code>DurableObjectRoutingError</code>. The Dockerfile
-                        tracks whatever celld.dev serves latest; pin a version
-                        if you care.
-                    </p>
-                </div>
 
                 <h3 id="security">Security notes</h3>
                 <ul>

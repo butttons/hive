@@ -77,7 +77,7 @@ Every command takes `--json`.
 | command | flags | description |
 | --- | --- | --- |
 | `hive add <name>` | `--port`, `--force` | Scaffold a new app (wrangler.jsonc + index.ts + tsconfig + package.json) and allocate a free port. |
-| `hive deploy` | `--docker`, `--local`, `--no-restart`, `--filter` | `tsc -b` → `celld deploy` → restart node → 30s health gate. Prints version ID. `--no-restart` uploads only, for externally supervised nodes (Coolify & co). |
+| `hive deploy` | `--docker`, `--local`, `--no-restart`, `--filter` | `tsc -b` → `celld deploy` → restart node → 30s health gate. Prints version ID. `--no-restart` uploads only, for externally supervised nodes (compose & co). |
 | `hive deploy all` | `--docker`, `--local`, `--packages` | Deploy every workspace app sequentially, continuing past failures. |
 | `hive up` | `--docker`, `--local` | Start the node. Idempotent; config drift restarts. |
 | `hive down` | `--local` | Stop node gracefully via SIGTERM; celld drains in-flight work. |
@@ -108,7 +108,7 @@ Self-managed Cloudflare OAuth (authorization code + PKCE, no client secret). Def
 - **process** (default): `celld` detached, logs to `.hive/node.log`, `down` = SIGTERM. No supervisor; reboot leaves node down until next `hive up`.
 - **docker** (`--docker` or `"backend": "docker"`): container `hive-<app>` from image `hive/celld:<version>` (built on demand), published on `127.0.0.1:<port>`, `--restart unless-stopped`. Drift detected by label hash → recreate. `docker stop` drains gracefully.
 
-Self-supervised containers (compose, Coolify): `examples/docker-compose.yml` runs a node from the official `ghcr.io/denoland/celld` image plus a cloudflared sidecar; `hive env --tunnel > .env` generates its credentials; deploys are `hive deploy --no-restart && docker compose restart <app>`.
+Self-supervised containers (compose & co.): `examples/docker-compose.yml` runs a node from the official `ghcr.io/denoland/celld` image plus a cloudflared sidecar; `hive env --tunnel > .env` generates its credentials; deploys are `hive deploy --no-restart && docker compose restart <app>`.
 
 Only one node per fleet bucket prefix. Two nodes on the same `s3://bucket/<app>` prefix cause `DurableObjectRoutingError: owner unreachable`.
 
@@ -141,10 +141,6 @@ hive exe domain           # mybot.example.com live: DNS-only CNAME + exe.dev reg
 ## Going to production
 
 From a plain `index.ts` + `wrangler.jsonc`: `hive init` (port + bucket creds) → set `server`/`dir`/`domain` in the hive block → `hive bootstrap` (installs hive + celld on the box) → `hive deploy` (ship + restart + health gate over ssh). Ingress options, all ending at the same `127.0.0.1:<port>` listener: exe.dev front door (`hive exe share && hive exe domain`), Cloudflare Tunnel (`hive cf tunnel`, zero inbound ports), or any own reverse proxy. Updating is `hive deploy` again. CI: stock GitHub runner + bucket creds + SSH key.
-
-## Coolify
-
-Coolify replaces hive's node supervision and ingress, not the deploy pipeline. celld loads `deploy/current.json` at startup (the restart is the reload), and Coolify redeploys fire on git push, not bucket writes. Split: Coolify runs one container per app and owns TLS + domain; CI runs `hive deploy --no-restart` then POSTs the app's Coolify deploy webhook to restart the container. Container = small Dockerfile installing celld (`curl -fsSL https://celld.dev/install.sh | sh` on debian:stable-slim) with `celld --bucket <bucket>/<app> --listen 0.0.0.0:<port> --endpoint <s3-endpoint> --trust-forwarded-headers` as CMD; S3 creds in Coolify env UI; health check `/__celld/health`. Never scale past 1 replica (one node per bucket prefix).
 
 ## Environment variables
 

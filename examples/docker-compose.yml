@@ -1,5 +1,5 @@
 # Example: run a hive app as a docker compose stack — celld node + cloudflared.
-# Works on any docker host (laptop, VM, Coolify). All credentials come from
+# Works on any docker host (laptop, VM). All credentials come from
 # env vars / the .env next to this file — never commit it.
 #
 # Setup, from the app directory:
