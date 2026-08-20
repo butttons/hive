@@ -70,7 +70,7 @@ Two files per app project, same directory:
 
 - Cloudflare opened self-managed OAuth to all developers (June 2026): register an OAuth client, `hive login` runs a consent flow with exact scopes (R2 edit, Tunnel edit, DNS edit) → scoped token. This is the entire manual surface — one browser consent.
 - Bucket creation, tunnel, DNS: all REST API. Do NOT build on the `cf` CLI — it's a technical preview covering a subset; call the REST API directly.
-- R2 S3 key pairs ARE mintable via REST: create a user API token (POST `/user/tokens`) with the `Workers R2 Storage Bucket Item Write` permission group scoped to the bucket; Access Key ID = the token's `id`, Secret Access Key = SHA-256 hex of the token's `value`. Requires the OAuth client to also allowlist the API Tokens edit scope; without it, `init` deep-links the R2 API tokens page and accepts `--access-key`/`--secret-key`.
+- R2 S3 key pairs ARE mintable via REST (create a user API token with the `Workers R2 Storage Bucket Item Write` permission group scoped to the bucket; Access Key ID = the token's `id`, Secret Access Key = SHA-256 hex of the token's `value`) — but NOT with an OAuth token: the self-managed OAuth catalog is a fixed 14-scope list (r2, dns, zone, argotunnel, access-*) with no API Tokens scope. So `init`'s mint path works only with a `CLOUDFLARE_API_TOKEN` that has API Tokens Edit; OAuth users get the deep-link + `--access-key`/`--secret-key` paste path.
 
 ## Cloudflare OAuth (`hive login`)
 
