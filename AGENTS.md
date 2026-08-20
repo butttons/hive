@@ -84,7 +84,7 @@ Two files per app project, same directory:
 
 ## celld operational facts (verified by doing)
 
-- Installed at `~/.local/bin/celld` (v0.2.1). Docs: https://celld.dev/docs. Repo clone for examples: `~/Work/playground/vendor/celld`.
+- Installed at `~/.local/bin/celld` (v0.2.1). Docs: https://celld.dev/docs. Examples: `github.com/denoland/celld` (no local clone).
 - **One app = one fleet = one bucket prefix.** `s3://bucket/<app>`; nodes load `deploy/current.json` at startup — restart after every deploy.
 - Nodes need `esbuild` on PATH for deploys (0.28.2 installed globally).
 - The bucket is the administrative authority: deployments, SQLite replicas, ownership records, node leases, peer-auth secret. Credentials = full fleet control.
