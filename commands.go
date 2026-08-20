@@ -335,7 +335,6 @@ func cmdDeploy(ctx context.Context, args []string) error {
 	return nil
 }
 func cmdInit(ctx context.Context, args []string) error   { return notImplemented("init") }
-func cmdLogin(ctx context.Context, args []string) error  { return notImplemented("login") }
 func cmdTunnel(ctx context.Context, args []string) error { return notImplemented("tunnel") }
 func cmdUI(ctx context.Context, args []string) error     { return notImplemented("ui") }
 

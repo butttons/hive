@@ -66,6 +66,16 @@ Two files per app project, same directory:
 - Bucket creation, tunnel, DNS: all REST API. Do NOT build on the `cf` CLI — it's a technical preview covering a subset; call the REST API directly.
 - **OPEN GAP — verify before `init`:** whether R2 S3 access-key pairs (what celld's AWS credential chain needs: `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`) are mintable via REST API, or still dashboard-only. If dashboard-only, `init` deep-links the user and accepts a paste.
 
+## Cloudflare OAuth (`hive login`)
+
+- Default public client ID: `d6188eb87e7198f8f9fd8ef81abc6539`. Override with `HIVE_CF_CLIENT_ID`.
+- Authorization endpoint: `https://dash.cloudflare.com/oauth2/auth`. Token endpoint: `https://dash.cloudflare.com/oauth2/token`.
+- Redirect URI: `http://127.0.0.1:8976/callback`. Port is hardcoded; override with `HIVE_LOGIN_PORT` only for tests.
+- Flow: OAuth 2.0 Authorization Code + PKCE (`S256`), token endpoint authentication method `none`, no client secret.
+- Requested scopes: `argotunnel.write dns.write zone.read account.read workers-r2.write`. The R2 scope (`workers-r2.write`) was inferred from the cfui project's live OAuth usage ([cfui README](https://github.com/dockers-x/cfui)); ensure the registered OAuth client allowlists every requested scope.
+- Token storage: `~/.config/hive/auth.json`, written `0600`. Stores `access_token`, `refresh_token`, `expires_at`, and `scope`. Token values are never logged.
+- `loadToken()` refreshes an expired token automatically when a `refresh_token` is present. `hive login --status` reports validity, expiry, and granted scopes.
+
 ## celld operational facts (verified by doing)
 
 - Installed at `~/.local/bin/celld` (v0.2.1). Docs: https://celld.dev/docs. Repo clone for examples: `~/Work/playground/vendor/celld`.
@@ -92,7 +102,7 @@ Two files per app project, same directory:
 
 ## Current state
 
-`add`, `up`/`down`, `deploy`, and `check` are implemented and dogfooded against `playground/apps/counter`. `init`, `login`, `tunnel`, and `ui` are still stubs. Builds clean: `go vet ./... && CGO_ENABLED=0 go build `.
+`add`, `up`/`down`, `deploy`, `check`, and `login` are implemented. `add` through `deploy` are dogfooded against `playground/apps/counter`. `init`, `tunnel`, and `ui` are still stubs. Builds clean: `go vet ./... && CGO_ENABLED=0 go build `.
 
 ## Build order (next steps, in order)
 
@@ -102,7 +112,7 @@ Two files per app project, same directory:
 4. `check` — ✅ celld-legal key list validation + deploy-path dry-run.
 5. launchd backend on the remote box (dry-run, not done); systemd backend (code written, untested locally).
 6. `tunnel` — REST-driven remotely-managed tunnel.
-7. `login`/`init` — OAuth + bucket provisioning (resolve the R2 S3-keys API gap first).
+7. `init` — bucket provisioning (resolve the R2 S3-keys API gap first).
 8. `ui` — local SPA served from the binary via embed.FS; zero own logic, pure skin over `status --json`.
 
 ## Conventions
