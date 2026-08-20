@@ -103,9 +103,9 @@ Two files per app project, same directory:
 
 ## Test environments (live)
 
-- **playground** at `~/Work/playground` — the hive playground monorepo (npm workspaces, `apps/*`). Has its own AGENTS.md. Bucket `mybucket` (default jurisdiction), per-app creds in `~/.config/hive/<app>.env` via `hive init`. Apps: `counter` (port 8101, domain counter.example.com, server user@box) and `wsecho` (port 8102). The old `old-bucket` bucket (other CF account) was purged; `env.sh` there keeps those creds alive only as an archive.
-- **remote box** — `user@box`, SSH key auth confirmed working, macOS 26.4.1 arm64. hive + celld binaries installed at `~/.local/bin`. Needs docker for the docker backend. First remote target.
-- Cloudflare: OAuth client `d6188eb87e7198f8f9fd8ef81abc6539` on account `00000000000000000000000000000000`. The `hive` tunnel and `counter.example.com` record were created, verified live, then deleted during cleanup — recreate with `hive tunnel`.
+- **playground** at `~/Work/playground` — the hive playground monorepo (pnpm workspaces, `apps/*`). Has its own AGENTS.md. Bucket `mybucket` (default jurisdiction), per-app creds in `~/.config/hive/<app>.env` via `hive init`. Apps: `counter` (port 8101, domain counter.example.com, server user@box) and `wsecho` (port 8102). The old `old-bucket` bucket and `env.sh` are gone.
+- **remote box** — `user@box`, SSH key auth confirmed working, macOS 26.4.1 arm64. hive + celld binaries at `~/.local/bin` (rebuild with `CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build` + scp when hive changes). **Process backend verified E2E**: `hive deploy` from the laptop syncs `~/.config/hive/counter.env`, restarts the mini's node over ssh, health-gates, and the app serves on `127.0.0.1:8101` (verified with a remote curl). **Gotcha:** only ONE node per fleet bucket prefix may run — a local node and the mini node on `mybucket/counter` simultaneously produced `DurableObjectRoutingError: owner unreachable` (the mini routed to the unreachable local lease holder). `hive down --local` before testing remote. No docker installed (docker backend untested there; install pending user's call). Non-login ssh PATH lacks `brew`/`docker` — hive's proxied commands work because `~/.local/bin` is on it, but anything Homebrew-installed needs `zsh -lc` or absolute paths.
+- Cloudflare: OAuth client `d6188eb87e7198f8f9fd8ef81abc6539` on account `00000000000000000000000000000000`. The `hive` tunnel (id `00000000-0000-0000-0000-000000000000`) and `counter.example.com` DNS record exist and are verified live end-to-end (public curl → tunnel → mini node). Connector on the mini: brew `cloudflared`, installed as a **user** LaunchAgent (`com.cloudflare.cloudflared`, token file under `~/Library/Application Support/com.cloudflare.cloudflared/`) — runs only while the user is logged in, and over ssh it needs a `launchctl kickstart gui/<uid>/com.cloudflare.cloudflared` the first time. The mini runs other unrelated tunnels — NEVER `pkill cloudflared`.
 
 ## Current state
 
@@ -117,10 +117,10 @@ Two files per app project, same directory:
 2. `up`/`down` local backend — ✅ process backend done; launchd/systemd code written.
 3. `deploy` — ✅ tsc → celld deploy → restart → health gate. Dogfooded end-to-end against `counter`.
 4. `check` — ✅ celld-legal key list validation + deploy-path dry-run.
-5. launchd backend on the remote box (dry-run, not done); systemd backend (code written, untested locally).
-6. `tunnel` — REST-driven remotely-managed tunnel.
-7. `init` — bucket provisioning (resolve the R2 S3-keys API gap first).
-8. `ui` — local SPA served from the binary via embed.FS; zero own logic, pure skin over `status --json`.
+5. launchd/systemd backends — CUT; docker subsumes them. Docker backend verified locally; on the remote box pending a docker install.
+6. `tunnel` — ✅ REST-driven remotely-managed tunnel, verified live (create/configure/DNS/teardown). Connector install on the remote box via `cloudflared service install`.
+7. `init` — ✅ provider-agnostic cred chain: `--access-key/--secret-key/--endpoint` flags (zero CF calls) → reuse from a sibling app's env file with matching `CELLD_BUCKET` → CF mint (needs `CLOUDFLARE_API_TOKEN` with API Tokens Edit) → deep-link paste fallback. Paste path verified live.
+8. `ui` — local SPA served from the binary via embed.FS; zero own logic, pure skin over `status --json`. Parked by user.
 
 ## Conventions
 
