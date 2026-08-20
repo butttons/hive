@@ -298,7 +298,7 @@ func remoteHive(server string, app *App, cmd string, args []string) error {
 				os.Exit(status.ExitStatus())
 			}
 		}
-		return fmt.Errorf("ssh %s ~/.local/bin/hive %s failed: %w (is hive installed on the box?)", server, cmd, err)
+		return fmt.Errorf("ssh %s ~/.local/bin/hive %s failed: %w (is hive installed on the box? run `hive bootstrap`)", server, cmd, err)
 	}
 	return nil
 }
@@ -820,7 +820,7 @@ func runRemoteHive(server string, app *App, cmd string, args []string, toStderr 
 				return fmt.Errorf("ssh %s ~/.local/bin/hive %s exited %d: %w", server, cmd, status.ExitStatus(), err)
 			}
 		}
-		return fmt.Errorf("ssh %s ~/.local/bin/hive %s failed: %w (is hive installed on the box?)", server, cmd, err)
+		return fmt.Errorf("ssh %s ~/.local/bin/hive %s failed: %w (is hive installed on the box? run `hive bootstrap`)", server, cmd, err)
 	}
 	return nil
 }

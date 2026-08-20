@@ -233,12 +233,19 @@ type cfDNSRecord struct {
 	Type    string `json:"type"`
 	Name    string `json:"name"`
 	Content string `json:"content"`
+	Proxied bool   `json:"proxied"`
 }
 
 // upsertTunnelCNAME points hostname at the tunnel (CNAME to
 // <tunnel-id>.cfargotunnel.com, proxied), updating any stale record.
 func upsertTunnelCNAME(ctx context.Context, zoneID, hostname, tunnelID string) (bool, error) {
-	target := tunnelID + ".cfargotunnel.com"
+	return upsertCNAME(ctx, zoneID, hostname, tunnelID+".cfargotunnel.com", true)
+}
+
+// upsertCNAME points hostname at target, replacing any stale A/AAAA/CNAME
+// record for the name. proxied toggles the Cloudflare proxy; exe.dev custom
+// domains require it false.
+func upsertCNAME(ctx context.Context, zoneID, hostname, target string, proxied bool) (bool, error) {
 	raw, err := cfRequest(ctx, http.MethodGet, "/zones/"+zoneID+"/dns_records",
 		url.Values{"name": {hostname}}, nil, nil)
 	if err != nil {
@@ -249,15 +256,17 @@ func upsertTunnelCNAME(ctx context.Context, zoneID, hostname, tunnelID string) (
 		return false, fmt.Errorf("parse dns records: %w", err)
 	}
 	for _, r := range records {
-		if (r.Type == "CNAME" || r.Type == "A" || r.Type == "AAAA") && r.Content != target {
-			if _, err := cfRequest(ctx, http.MethodDelete, "/zones/"+zoneID+"/dns_records/"+r.ID, nil, nil, nil); err != nil {
-				return false, fmt.Errorf("delete stale %s record for %s: %w", r.Type, hostname, err)
-			}
-		} else if r.Type == "CNAME" && r.Content == target {
+		if r.Type != "CNAME" && r.Type != "A" && r.Type != "AAAA" {
+			continue
+		}
+		if r.Type == "CNAME" && r.Content == target && r.Proxied == proxied {
 			return false, nil
 		}
+		if _, err := cfRequest(ctx, http.MethodDelete, "/zones/"+zoneID+"/dns_records/"+r.ID, nil, nil, nil); err != nil {
+			return false, fmt.Errorf("delete stale %s record for %s: %w", r.Type, hostname, err)
+		}
 	}
-	body := map[string]any{"type": "CNAME", "name": hostname, "content": target, "proxied": true}
+	body := map[string]any{"type": "CNAME", "name": hostname, "content": target, "proxied": proxied}
 	if _, err := cfRequest(ctx, http.MethodPost, "/zones/"+zoneID+"/dns_records", nil, body, nil); err != nil {
 		return false, fmt.Errorf("create CNAME for %s: %w", hostname, err)
 	}

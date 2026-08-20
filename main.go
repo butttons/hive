@@ -19,7 +19,9 @@ var commands = []command{
 	{"down", "Stop the node gracefully", cmdDown},
 	{"status", "Show what is running, which version, and health", cmdStatus},
 	{"init", "Configure bucket credentials for this project", cmdInit},
+	{"bootstrap", "Install hive + celld on the app's server", cmdBootstrap},
 	{"cf", "Cloudflare commands: login, tunnel", cmdCF},
+	{"exe", "exe.dev commands: new, share, domain", cmdExe},
 	{"ui", "Serve the local fleet dashboard", cmdUI},
 }
 
