@@ -210,8 +210,30 @@ func cmdExeDomain(ctx context.Context, args []string) error {
 	if err := waitForDNS(ctx, app.Hive.Domain, 2*time.Minute); err != nil {
 		return err
 	}
-	if _, err := exeCLI(ctx, "domain", "add", vm, app.Hive.Domain); err != nil {
-		return err
+	// exe.dev verifies DNS from its own resolver, which lags ours, and
+	// `domain add` can report failure only on stdout. Retry until the
+	// registration is visible in `domain ls`.
+	var lastErr error
+	registered := false
+	for range 10 {
+		if _, err := exeCLI(ctx, "domain", "add", vm, app.Hive.Domain); err != nil {
+			lastErr = err
+		}
+		if out, err := exeCLI(ctx, "domain", "ls", vm); err == nil && strings.Contains(out, app.Hive.Domain) {
+			registered = true
+			break
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(5 * time.Second):
+		}
+	}
+	if !registered {
+		if lastErr != nil {
+			return fmt.Errorf("register %s with exe.dev: %w", app.Hive.Domain, lastErr)
+		}
+		return fmt.Errorf("exe.dev did not register %s (their resolver cannot see the CNAME yet — re-run in a minute)", app.Hive.Domain)
 	}
 
 	if *jsonFlag {
