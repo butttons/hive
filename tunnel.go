@@ -27,7 +27,7 @@ type cfError struct {
 }
 
 func cfRequest(ctx context.Context, method, path string, query url.Values, body any, out json.RawMessage) (json.RawMessage, error) {
-	tok, err := loadToken(ctx)
+	token, err := cfAccessToken(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -49,7 +49,7 @@ func cfRequest(ctx context.Context, method, path string, query url.Values, body 
 	if err != nil {
 		return nil, fmt.Errorf("build request: %w", err)
 	}
-	req.Header.Set("Authorization", "Bearer "+tok.AccessToken)
+	req.Header.Set("Authorization", "Bearer "+token)
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}

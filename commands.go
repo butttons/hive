@@ -334,7 +334,6 @@ func cmdDeploy(ctx context.Context, args []string) error {
 	printDeployResult(app, version, steps, start, *jsonFlag, nil)
 	return nil
 }
-func cmdInit(ctx context.Context, args []string) error   { return notImplemented("init") }
 func cmdUI(ctx context.Context, args []string) error     { return notImplemented("ui") }
 
 func loadCwdApp() (*App, error) {

@@ -64,16 +64,25 @@ func cmdLogin(ctx context.Context, args []string) error {
 	jsonFlag := fs.Bool("json", false, "")
 	statusFlag := fs.Bool("status", false, "")
 	noBrowser := fs.Bool("no-browser", false, "")
+	exportFlag := fs.Bool("export", false, "")
 	if err := fs.Parse(args); err != nil {
 		return fmt.Errorf("parse flags: %w", err)
 	}
 	if *statusFlag {
 		return loginStatus(ctx, *jsonFlag)
 	}
-	return runLogin(ctx, *jsonFlag, *noBrowser)
+	return runLogin(ctx, *jsonFlag, *noBrowser, *exportFlag)
 }
 
 func loginStatus(ctx context.Context, jsonMode bool) error {
+	if v := os.Getenv("CLOUDFLARE_API_TOKEN"); v != "" {
+		if jsonMode {
+			fmt.Println(`{"logged_in": true, "source": "env"}`)
+		} else {
+			fmt.Println("Using CLOUDFLARE_API_TOKEN from the environment.")
+		}
+		return nil
+	}
 	tok, err := loadToken(ctx)
 	if jsonMode {
 		st := struct {
@@ -106,7 +115,7 @@ func loginStatus(ctx context.Context, jsonMode bool) error {
 	return nil
 }
 
-func runLogin(ctx context.Context, jsonMode, noBrowser bool) error {
+func runLogin(ctx context.Context, jsonMode, noBrowser, exportMode bool) error {
 	verifier, challenge, err := generatePKCE()
 	if err != nil {
 		return fmt.Errorf("generate PKCE: %w", err)
@@ -137,6 +146,10 @@ func runLogin(ctx context.Context, jsonMode, noBrowser bool) error {
 	if err != nil {
 		return fmt.Errorf("token exchange failed: %w", err)
 	}
+	if exportMode {
+		fmt.Printf("export CLOUDFLARE_API_TOKEN=%s\n", shellSingleQuote(tr.AccessToken))
+		return nil
+	}
 	if err := saveToken(tr); err != nil {
 		return fmt.Errorf("save token: %w", err)
 	}
@@ -154,6 +167,7 @@ func runLogin(ctx context.Context, jsonMode, noBrowser bool) error {
 		return nil
 	}
 	fmt.Printf("Authorized. Scopes: %s\n", effectiveScope(tr))
+	fmt.Println("Token saved. To use env-var auth instead: hive login --export")
 	return nil
 }
 
@@ -332,6 +346,20 @@ func postToken(ctx context.Context, data url.Values) (*tokenResponse, error) {
 func tokenFilePath() string {
 	home, _ := os.UserHomeDir()
 	return filepath.Join(home, ".config", "hive", "auth.json")
+}
+
+// cfAccessToken resolves the Cloudflare credential. CLOUDFLARE_API_TOKEN in
+// the environment is the source of truth; the OAuth token file written by
+// hive login is the fallback for users who went through the consent flow.
+func cfAccessToken(ctx context.Context) (string, error) {
+	if v := os.Getenv("CLOUDFLARE_API_TOKEN"); v != "" {
+		return v, nil
+	}
+	tok, err := loadToken(ctx)
+	if err != nil {
+		return "", err
+	}
+	return tok.AccessToken, nil
 }
 
 func ensureConfigDir() error {

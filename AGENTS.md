@@ -54,9 +54,15 @@ Two files per app project, same directory:
 - `hive status` — current app config + node state (running, pid, backend, health). `--json` is the primary interface. Live version from the bucket is shown only when cheap to read; otherwise "unknown".
 - Later: `init` (bucket creds), `login` (OAuth), `tunnel` (ingress), `ui` (local dashboard).
 
-## Ingress: remotely-managed Cloudflare Tunnels (settled)
+## Provider model (settled)
 
-- celld terminates no TLS and does no host routing. Ingress = Cloudflare Tunnel, **remotely-managed via REST API**: create tunnel, `PUT /cfd_tunnel/<id>/configurations` for ingress rules (one hostname per app domain → `localhost:<port>`), create DNS records via API. The box receives only a tunnel token and runs `cloudflared service install <token>`. No `cloudflared login` browser dance, no cert.pem, no config.yaml on the box.
+- **hive's core is provider-agnostic.** The hard requirements for running an app are: S3-compatible credentials (`AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`/`S3_ENDPOINT`/`AWS_REGION`/`CELLD_BUCKET`) and a box (Linux/macOS) reachable over SSH. Everything in `add`/`check`/`up`/`down`/`deploy`/`status` works with exactly that — no Cloudflare anything.
+- **Cloudflare is an optional convenience provider**, not a dependency: `login` (OAuth consent), `init` (R2 bucket + S3 key provisioning), and `tunnel` (ingress) automate the Cloudflare path. Users without Cloudflare set the S3 env vars themselves and terminate TLS however they want (caddy, nginx, their own tunnel) — hive does not prescribe ingress for them.
+- **Env vars are the auth source of truth.** `CLOUDFLARE_API_TOKEN` in the environment wins over anything stored; `hive login` merely manages `~/.config/hive/auth.json` as a cache and can emit `export CLOUDFLARE_API_TOKEN=...` via `--export`. Same rule for celld: the process environment (or the per-app `~/.config/hive/<app>.env` file) feeds everything.
+
+## Ingress: remotely-managed Cloudflare Tunnels (the Cloudflare path)
+
+- celld terminates no TLS and does no host routing. The Cloudflare ingress path = remotely-managed tunnel via REST API: create tunnel, `PUT /cfd_tunnel/<id>/configurations` for ingress rules (one hostname per app domain → `localhost:<port>`), create DNS records via API. The box receives only a tunnel token and runs `cloudflared service install <token>`. No `cloudflared login` browser dance, no cert.pem, no config.yaml on the box.
 - Zero inbound ports on the box; celld's public listener stays on 127.0.0.1. The internal/operator listener is unauthenticated — never expose it.
 - Run nodes with `--trust-forwarded-headers` so `request.url` keeps public scheme/host.
 
@@ -64,7 +70,7 @@ Two files per app project, same directory:
 
 - Cloudflare opened self-managed OAuth to all developers (June 2026): register an OAuth client, `hive login` runs a consent flow with exact scopes (R2 edit, Tunnel edit, DNS edit) → scoped token. This is the entire manual surface — one browser consent.
 - Bucket creation, tunnel, DNS: all REST API. Do NOT build on the `cf` CLI — it's a technical preview covering a subset; call the REST API directly.
-- **OPEN GAP — verify before `init`:** whether R2 S3 access-key pairs (what celld's AWS credential chain needs: `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`) are mintable via REST API, or still dashboard-only. If dashboard-only, `init` deep-links the user and accepts a paste.
+- R2 S3 key pairs ARE mintable via REST: create a user API token (POST `/user/tokens`) with the `Workers R2 Storage Bucket Item Write` permission group scoped to the bucket; Access Key ID = the token's `id`, Secret Access Key = SHA-256 hex of the token's `value`. Requires the OAuth client to also allowlist the API Tokens edit scope; without it, `init` deep-links the R2 API tokens page and accepts `--access-key`/`--secret-key`.
 
 ## Cloudflare OAuth (`hive login`)
 
@@ -72,8 +78,8 @@ Two files per app project, same directory:
 - Authorization endpoint: `https://dash.cloudflare.com/oauth2/auth`. Token endpoint: `https://dash.cloudflare.com/oauth2/token`.
 - Redirect URI: `http://127.0.0.1:8976/callback`. Port is hardcoded; override with `HIVE_LOGIN_PORT` only for tests.
 - Flow: OAuth 2.0 Authorization Code + PKCE (`S256`), token endpoint authentication method `none`, no client secret.
-- Requested scopes: `argotunnel.write dns.write zone.read account.read workers-r2.write`. The R2 scope (`workers-r2.write`) was inferred from the cfui project's live OAuth usage ([cfui README](https://github.com/dockers-x/cfui)); ensure the registered OAuth client allowlists every requested scope.
-- Token storage: `~/.config/hive/auth.json`, written `0600`. Stores `access_token`, `refresh_token`, `expires_at`, and `scope`. Token values are never logged.
+- Requested scopes: `argotunnel.write dns.write zone.read workers-r2.write`. Note: `account.read` is not allowlistable on self-managed clients (consent fails with `invalid_scope`); zone listing covers account discovery. The R2 scope (`workers-r2.write`) comes from the cfui project's live OAuth usage ([cfui README](https://github.com/dockers-x/cfui)).
+- Token storage: `~/.config/hive/auth.json`, written `0600`. Stores `access_token`, `refresh_token`, `expires_at`, and `scope`. Token values are never logged. `hive login --export` prints `export CLOUDFLARE_API_TOKEN=...` instead of saving.
 - `loadToken()` refreshes an expired token automatically when a `refresh_token` is present. `hive login --status` reports validity, expiry, and granted scopes.
 
 ## celld operational facts (verified by doing)
@@ -102,7 +108,7 @@ Two files per app project, same directory:
 
 ## Current state
 
-`add`, `up`/`down`, `deploy`, `check`, and `login` are implemented. `add` through `deploy` are dogfooded against `playground/apps/counter`. `init`, `tunnel`, and `ui` are still stubs. Builds clean: `go vet ./... && CGO_ENABLED=0 go build `.
+`add`, `up`/`down`, `deploy`, `check`, `login`, and `tunnel` are implemented; `add` through `deploy` are dogfooded against `playground/apps/counter`, `login` and `tunnel` verified against the live Cloudflare account. `init` is implemented but its token-minting path is blocked on the API Tokens OAuth scope (bucket creation verified; `mybucket` exists). `ui` is still a stub. Builds clean: `go vet ./... && CGO_ENABLED=0 go build `.
 
 ## Build order (next steps, in order)
 
