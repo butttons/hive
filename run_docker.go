@@ -1,13 +1,10 @@
 package main
 
 import (
-	"compress/gzip"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
-	"io"
-	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -16,19 +13,13 @@ import (
 	"time"
 )
 
-// dockerRunner runs the node as a container: image built from the official
-// celld release binary, published on 127.0.0.1:<port>, restarted by docker.
-// Same deployment targets as celld itself: linux/amd64, linux/arm64,
-// darwin/arm64 (via Docker Desktop's VM).
+// dockerRunner runs the node as a container from the official celld image,
+// published on 127.0.0.1:<port>, restarted by docker. Same deployment
+// targets as celld itself: linux/amd64, linux/arm64, darwin/arm64 (via
+// Docker Desktop's VM).
 type dockerRunner struct{}
 
-const dockerImageRepo = "hive/celld"
-
-var dockerfile = `FROM debian:bookworm-slim
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*
-COPY celld /usr/local/bin/celld
-ENTRYPOINT ["celld"]
-`
+const dockerImageRepo = "ghcr.io/denoland/celld"
 
 func dockerContainerName(app *App) string { return "hive-" + app.Name }
 
@@ -63,68 +54,7 @@ func celldVersion() (string, error) {
 	return v, nil
 }
 
-func dockerTargetArch(ctx context.Context) (string, error) {
-	out, err := docker("version", "--format", "{{.Server.Arch}}")
-	if err != nil {
-		return "", fmt.Errorf("docker daemon unreachable (is it running?): %w", err)
-	}
-	switch out {
-	case "aarch64", "arm64":
-		return "aarch64-unknown-linux-gnu", nil
-	case "x86_64", "amd64":
-		return "x86_64-unknown-linux-gnu", nil
-	}
-	return "", fmt.Errorf("no celld release for docker arch %q", out)
-}
-
-// fetchCelldBinary downloads the celld release binary for target, cached
-// under ~/.config/hive/celld/.
-func fetchCelldBinary(ctx context.Context, version, target string) (string, error) {
-	dir := filepath.Join(appEnvDir(), "celld", version+"-"+target)
-	bin := filepath.Join(dir, "celld")
-	if _, err := os.Stat(bin); err == nil {
-		return bin, nil
-	}
-	url := fmt.Sprintf("https://github.com/denoland/celld/releases/download/%s/celld-%s.gz", version, target)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return "", err
-	}
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("download %s: %w", url, err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("download %s: %s", url, resp.Status)
-	}
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return "", err
-	}
-	tmp := bin + ".tmp"
-	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o755)
-	if err != nil {
-		return "", err
-	}
-	gz, err := gzip.NewReader(resp.Body)
-	if err != nil {
-		f.Close()
-		return "", fmt.Errorf("gunzip %s: %w", url, err)
-	}
-	if _, err := io.Copy(f, gz); err != nil {
-		f.Close()
-		return "", fmt.Errorf("gunzip %s: %w", url, err)
-	}
-	if err := f.Close(); err != nil {
-		return "", err
-	}
-	if err := os.Rename(tmp, bin); err != nil {
-		return "", err
-	}
-	return bin, nil
-}
-
-// ensureDockerImage builds hive/celld:<version> if missing.
+// ensureDockerImage pulls ghcr.io/denoland/celld:<version> if missing.
 func ensureDockerImage(ctx context.Context) (string, error) {
 	version, err := celldVersion()
 	if err != nil {
@@ -134,49 +64,12 @@ func ensureDockerImage(ctx context.Context) (string, error) {
 	if _, err := docker("image", "inspect", image); err == nil {
 		return image, nil
 	}
-	target, err := dockerTargetArch(ctx)
-	if err != nil {
-		return "", err
-	}
-	bin, err := fetchCelldBinary(ctx, version, target)
-	if err != nil {
-		return "", err
-	}
-	ctxDir, err := os.MkdirTemp("", "hive-docker-build")
-	if err != nil {
-		return "", err
-	}
-	defer os.RemoveAll(ctxDir)
-	if err := os.WriteFile(filepath.Join(ctxDir, "Dockerfile"), []byte(dockerfile), 0o644); err != nil {
-		return "", err
-	}
-	linkOrCopy := func() error {
-		dst := filepath.Join(ctxDir, "celld")
-		if err := os.Link(bin, dst); err != nil {
-			in, err := os.Open(bin)
-			if err != nil {
-				return err
-			}
-			defer in.Close()
-			out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o755)
-			if err != nil {
-				return err
-			}
-			defer out.Close()
-			_, err = io.Copy(out, in)
-			return err
-		}
-		return nil
-	}
-	if err := linkOrCopy(); err != nil {
-		return "", fmt.Errorf("stage celld binary: %w", err)
-	}
-	fmt.Printf("building image %s (celld %s, %s)\n", image, version, target)
-	c := exec.Command("docker", "build", "-t", image, ctxDir)
+	fmt.Printf("pulling image %s\n", image)
+	c := exec.CommandContext(ctx, "docker", "pull", image)
 	c.Stdout = os.Stdout
 	c.Stderr = os.Stderr
 	if err := c.Run(); err != nil {
-		return "", fmt.Errorf("docker build: %w", err)
+		return "", fmt.Errorf("docker pull %s: %w", image, err)
 	}
 	return image, nil
 }

@@ -57,7 +57,7 @@ All implemented and verified live. User-facing reference: README.md / hive.buttt
 - `deploy` = typecheck (`tsc -b`) → `celld deploy` → restart node → 30s `/__celld/health` gate. **The restart is the reload** — no watch mode or HMR.
 - Backends behind one interface; `down` is SIGTERM either way (celld drains gracefully). Idempotent; config drift → restart.
   - **process** (default): `celld` detached, log `.hive/node.log`. No supervisor — a reboot leaves the node down.
-  - **docker** (`--docker` / `"backend": "docker"`): container `hive-<app>`, image `hive/celld:<version>` built on demand, `127.0.0.1:<port>`, `--restart unless-stopped`, 0600 `--env-file`, label-hash drift detection. launchd/systemd were cut (git history has them); docker subsumes them.
+  - **docker** (`--docker` / `"backend": "docker"`): container `hive-<app>`, official image `ghcr.io/denoland/celld:<version>` pulled on demand (pinned to the local celld version), `127.0.0.1:<port>`, `--restart unless-stopped`, 0600 `--env-file`, label-hash drift detection. launchd/systemd were cut (git history has them); docker subsumes them.
 - Deployment targets = celld's: linux/amd64, linux/arm64, darwin/arm64. A bare box needs exactly `hive` + `celld` at `~/.local/bin`, plus docker if wanted.
 
 ## Provider model (settled)

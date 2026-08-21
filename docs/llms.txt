@@ -106,7 +106,7 @@ Self-managed Cloudflare OAuth (authorization code + PKCE, no client secret). Def
 ## Run backends
 
 - **process** (default): `celld` detached, logs to `.hive/node.log`, `down` = SIGTERM. No supervisor; reboot leaves node down until next `hive up`.
-- **docker** (`--docker` or `"backend": "docker"`): container `hive-<app>` from image `hive/celld:<version>` (built on demand), published on `127.0.0.1:<port>`, `--restart unless-stopped`. Drift detected by label hash → recreate. `docker stop` drains gracefully.
+- **docker** (`--docker` or `"backend": "docker"`): container `hive-<app>` from the official `ghcr.io/denoland/celld:<version>` image (pulled on demand, pinned to the local celld version), published on `127.0.0.1:<port>`, `--restart unless-stopped`. Drift detected by label hash → recreate. `docker stop` drains gracefully.
 
 Self-supervised containers (compose & co.): `examples/docker-compose.yml` runs a node from the official `ghcr.io/denoland/celld` image plus a cloudflared sidecar; `hive env --tunnel > .env` generates its credentials; deploys are `hive deploy --no-restart && docker compose restart <app>`.
 
