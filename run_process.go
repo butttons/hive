@@ -73,7 +73,7 @@ func (processRunner) Up(ctx context.Context, app *App) error {
 	}
 
 	if ok, msg := waitForHealth(ctx, app); !ok {
-		return fmt.Errorf("node did not become healthy: %s", msg)
+		return fmt.Errorf("node did not become healthy: %s\nrecent %s:\n%s", msg, logPath, tailFile(logPath, 20))
 	}
 	fmt.Printf("node for %s is up (process)\n", app.Name)
 	return nil

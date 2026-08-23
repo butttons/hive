@@ -83,7 +83,7 @@ Every command takes `--json` and prints machine-readable output. Agents are the 
 | command | flags | what it does |
 | --- | --- | --- |
 | `hive add <name>` | `--port`, `--force` | Scaffold a new app (wrangler.jsonc + index.ts + tsconfig + package.json), allocate a free port |
-| `hive deploy` | `--docker`, `--local`, `--no-restart`, `--filter` | Typecheck (`tsc -b`) → `celld deploy` → restart the node → wait for `/__celld/health` (30s gate). Prints the version ID. `--no-restart` uploads only, for externally supervised nodes (compose & co.) |
+| `hive deploy` | `--docker`, `--local`, `--no-restart`, `--filter` | Typecheck (`tsc -b`) → `celld deploy` → restart the node → wait for `/__celld/health` (30s gate). Prints the version ID. On failure, prints the node's recent logs. `--no-restart` uploads only, for externally supervised nodes (compose & co.) |
 | `hive deploy all` | `--docker`, `--local`, `--packages` | Deploy every app in the workspace sequentially, continuing past failures |
 | `hive up` | `--docker`, `--local` | Start the node. Idempotent; config drift → restart |
 | `hive down` | `--local` | Stop the node gracefully (SIGTERM; celld drains in-flight work) |
@@ -97,6 +97,7 @@ Every command takes `--json` and prints machine-readable output. Agents are the 
 | `hive exe new <name>` | — | Create an exe.dev VM (idempotent) and wait for its DNS to propagate |
 | `hive exe share` | `--private` | Point the exe.dev HTTPS proxy at the app's port; public by default |
 | `hive exe domain` | — | CNAME the app's domain to the VM (DNS-only, via Cloudflare creds) and register it with exe.dev |
+| `hive version` | — | Print the hive version. Release binaries are stamped; remote commands warn when the box's hive differs — `hive bootstrap` syncs it |
 
 ### `hive init` credential chain
 

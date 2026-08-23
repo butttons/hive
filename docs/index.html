@@ -632,7 +632,8 @@ curl http://127.0.0.1:&lt;port&gt;/</code></pre>
                                     Typecheck (<code>tsc -b</code>) →
                                     <code>celld deploy</code> → restart the node
                                     → wait for <code>/__celld/health</code> (30s
-                                    gate). Prints the version ID.
+                                    gate). Prints the version ID. On failure,
+                                    prints the node's recent logs.
                                     <code>--no-restart</code> uploads only, for
                                     externally supervised nodes
                                 </td>
@@ -767,6 +768,16 @@ curl http://127.0.0.1:&lt;port&gt;/</code></pre>
                                     CNAME the app's domain to the VM (DNS-only,
                                     via Cloudflare creds) and register it with
                                     exe.dev
+                                </td>
+                            </tr>
+                            <tr>
+                                <td><code>hive version</code></td>
+                                <td>—</td>
+                                <td>
+                                    Print the hive version. Release binaries are
+                                    stamped; remote commands warn when the box's
+                                    hive differs —
+                                    <code>hive bootstrap</code> syncs it
                                 </td>
                             </tr>
                         </tbody>

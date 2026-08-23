@@ -12,6 +12,9 @@ type command struct {
 	run     func(context.Context, []string) error
 }
 
+// version is stamped by the release workflow via -ldflags -X main.version.
+var version = "dev"
+
 var commands = []command{
 	{"add", "Scaffold a new celld app in the current directory", cmdAdd},
 	{"deploy", "Build, ship to the fleet bucket, restart the node, wait for healthy", cmdDeploy},
@@ -24,6 +27,7 @@ var commands = []command{
 	{"cf", "Cloudflare commands: login, tunnel", cmdCF},
 	{"exe", "exe.dev commands: new, share, domain", cmdExe},
 	{"ui", "Serve the local fleet dashboard", cmdUI},
+	{"version", "Print the hive version", cmdVersion},
 }
 
 func usage() {

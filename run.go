@@ -103,6 +103,21 @@ func celldEnviron() []string {
 	return out
 }
 
+// tailFile returns the last n lines of the file at path, or a placeholder
+// when the file is missing or empty.
+func tailFile(path string, n int) string {
+	f, err := os.Open(path)
+	if err != nil {
+		return "(no log at " + path + ")"
+	}
+	defer f.Close()
+	lines, err := tailLines(f, n)
+	if err != nil || len(lines) == 0 {
+		return "(log " + path + " is empty)"
+	}
+	return strings.Join(lines, "\n")
+}
+
 func healthURL(app *App) string {
 	return fmt.Sprintf("http://127.0.0.1:%d/__celld/health", app.Hive.Port)
 }
