@@ -17,6 +17,25 @@ import (
 	"time"
 )
 
+func cmdVersion(ctx context.Context, args []string) error {
+	fs := flag.NewFlagSet("version", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	jsonFlag := fs.Bool("json", false, "")
+	if err := fs.Parse(args); err != nil {
+		return fmt.Errorf("parse flags: %w", err)
+	}
+	if *jsonFlag {
+		b, err := json.Marshal(map[string]string{"version": version})
+		if err != nil {
+			return fmt.Errorf("marshal version: %w", err)
+		}
+		fmt.Println(string(b))
+		return nil
+	}
+	fmt.Println(version)
+	return nil
+}
+
 func cmdDeploy(ctx context.Context, args []string) error {
 	var packagesFlags stringSlice
 	args = normalizeFlags(args, map[string]bool{"filter": true, "packages": true})
@@ -171,6 +190,9 @@ func runDeploy(ctx context.Context, app *App, dockerFlag, localFlag, jsonFlag, n
 	}
 
 	st = startStep("restart")
+	if app.Hive.Server != "" && !localFlag {
+		checkRemoteVersion(app.Hive.Server)
+	}
 	if err := restartNode(ctx, app, dockerFlag, localFlag, jsonFlag); err != nil {
 		steps = append(steps, st.done(false))
 		return deployResult{App: app.Name, Version: version, Steps: steps, DurationMs: time.Since(start).Milliseconds(), Error: err.Error()}
@@ -182,22 +204,50 @@ func runDeploy(ctx context.Context, app *App, dockerFlag, localFlag, jsonFlag, n
 	defer cancel()
 	var ok bool
 	var msg string
-	var logDir string
 	if app.Hive.Server != "" && !localFlag {
 		ok, msg = waitForRemoteHealth(healthCtx, app.Hive.Server, app)
-		logDir, _ = remoteAppDir(app)
 	} else {
 		ok, msg = waitForHealth(healthCtx, app)
-		logDir = app.Dir
 	}
 	if !ok {
-		logPath := filepath.Join(logDir, ".hive", "node.log")
 		steps = append(steps, st.done(false))
-		return deployResult{App: app.Name, Version: version, Steps: steps, DurationMs: time.Since(start).Milliseconds(), Error: fmt.Sprintf("health gate timed out after 30s (see %s): %s", logPath, msg)}
+		return deployResult{App: app.Name, Version: version, Steps: steps, DurationMs: time.Since(start).Milliseconds(), Error: fmt.Sprintf("health gate timed out after 30s: %s\nrecent node logs:\n%s", msg, recentNodeLogs(app, localFlag, dockerFlag))}
 	}
 	steps = append(steps, st.done(true))
 
 	return deployResult{App: app.Name, Version: version, Steps: steps, DurationMs: time.Since(start).Milliseconds()}
+}
+
+// recentNodeLogs returns the tail of the node's logs to annotate a failed
+// health gate: container logs for the docker backend, node.log for the
+// process backend, over ssh when the app lives on a server.
+func recentNodeLogs(app *App, local, dockerFlag bool) string {
+	if app.Hive.Server != "" && !local {
+		dir, err := remoteAppDir(app)
+		if err != nil {
+			return "(cannot resolve remote dir: " + err.Error() + ")"
+		}
+		var script string
+		if useDockerBackend(app, dockerFlag) {
+			script = "docker logs --tail 20 " + shellSingleQuote(dockerContainerName(app))
+		} else {
+			script = "tail -n 20 " + shellSingleQuote(filepath.Join(dir, ".hive", "node.log"))
+		}
+		out, err := exec.Command("ssh", app.Hive.Server, script).CombinedOutput()
+		s := strings.TrimSpace(string(out))
+		if err != nil || s == "" {
+			return "(no logs available)"
+		}
+		return s
+	}
+	if useDockerBackend(app, dockerFlag) {
+		logs, err := docker("logs", "--tail", "20", dockerContainerName(app))
+		if err != nil || logs == "" {
+			return "(no container logs available)"
+		}
+		return logs
+	}
+	return tailFile(filepath.Join(app.Dir, ".hive", "node.log"), 20)
 }
 
 func waitForRemoteHealth(ctx context.Context, server string, app *App) (bool, string) {
@@ -309,6 +359,24 @@ func remoteHive(server string, app *App, cmd string, args []string) error {
 	return nil
 }
 
+// checkRemoteVersion warns when the hive binary on the server differs from
+// the local one: the remote CLI executes the proxied command, so a version
+// skew means stale behavior. Dev builds skip the check.
+func checkRemoteVersion(server string) {
+	if version == "dev" {
+		return
+	}
+	out, err := exec.Command("ssh", server, "~/.local/bin/hive version").Output()
+	remote := strings.TrimSpace(string(out))
+	if err != nil || remote == "" {
+		fmt.Fprintf(os.Stderr, "warning: hive on %s predates the version command; run `hive bootstrap` to upgrade it\n", server)
+		return
+	}
+	if remote != version {
+		fmt.Fprintf(os.Stderr, "warning: hive on %s is %s but local is %s; run `hive bootstrap` to sync\n", server, remote, version)
+	}
+}
+
 func shellJoin(args []string) string {
 	var b strings.Builder
 	for i, a := range args {
@@ -335,6 +403,7 @@ func cmdUp(ctx context.Context, args []string) error {
 		return err
 	}
 	if app.Hive.Server != "" && !*localFlag {
+		checkRemoteVersion(app.Hive.Server)
 		if err := syncAppEnvFile(app.Hive.Server, app); err != nil {
 			return err
 		}
@@ -366,6 +435,7 @@ func cmdDown(ctx context.Context, args []string) error {
 		return err
 	}
 	if app.Hive.Server != "" && !*localFlag {
+		checkRemoteVersion(app.Hive.Server)
 		return remoteHive(app.Hive.Server, app, "down", append(fs.Args(), "--local"))
 	}
 
@@ -484,6 +554,7 @@ func resolveWorkspaceApp(cwd, filter string, packagesFlags []string) (*App, erro
 
 func printSingleStatus(ctx context.Context, app *App, local, jsonFlag bool) error {
 	if app.Hive.Server != "" && !local {
+		checkRemoteVersion(app.Hive.Server)
 		return remoteHive(app.Hive.Server, app, "status", []string{"--local"})
 	}
 
@@ -570,6 +641,7 @@ func firstNonEmpty(a, b string) string {
 
 func gatherStatusForFleet(ctx context.Context, app *App, local bool) statusResult {
 	if app.Hive.Server != "" && !local {
+		checkRemoteVersion(app.Hive.Server)
 		res, err := remoteStatusJSON(app.Hive.Server, app)
 		if err == nil {
 			return res
@@ -781,8 +853,7 @@ func restartNode(ctx context.Context, app *App, dockerFlag, local, jsonMode bool
 	healthCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	if err := r.Up(healthCtx, app); err != nil {
-		logPath := filepath.Join(app.Dir, ".hive", "node.log")
-		return fmt.Errorf("start node (see %s): %w", logPath, err)
+		return fmt.Errorf("start node: %w", err)
 	}
 	return nil
 }

@@ -44,6 +44,7 @@ Two files per app project, same directory:
 ## Remote model (settled)
 
 - `hive.server` is an **SSH host**. Unset = operate locally. Set = the CLI proxies to the hive binary on the box: `ssh <server> ~/.local/bin/hive <cmd> --local`. No RPC protocol; `--local` forces local.
+- Remote commands first run `hive version` on the box and warn on stderr when it differs from the local binary (release builds are stamped via `-ldflags -X main.version`; local `dev` builds skip the check). `hive bootstrap` syncs the box.
 - `hive.dir` is the absolute app directory on the server. When empty, the local `app.Dir` is sent verbatim (works when the box shares the filesystem layout, e.g. the mac mini). When set, it must start with `/` (no tilde expansion). `down` and `status` use it as the remote cwd.
 - On `deploy`/`up`, after syncing `~/.config/hive/<app>.env`, hive also `mkdir -p <dir>` and `scp package.json wrangler.jsonc` to `<dir>` before issuing the remote command. `celld deploy` is bucket-direct from anywhere; only restart + health checks touch the box.
 - CI = stock GitHub-hosted runner running `hive deploy`, reaching the box via SSH through the Cloudflare Tunnel (`hive cf tunnel --ssh` adds the `ssh.<domain>` ingress rule; `sshd` loopback-only, cloudflared as ProxyCommand). Secrets: bucket creds, SSH key, tunnel token.
@@ -52,12 +53,12 @@ Two files per app project, same directory:
 
 All implemented and verified live. User-facing reference: README.md / hive.butttons.dev.
 
-- `add` `deploy` `up` `down` `status` `init` `env` `bootstrap` `cf` `exe` `ui`. `env` prints the effective app env (shell-sourcable; `--tunnel` adds TUNNEL_TOKEN) — feeds compose `.env` and CI secrets.
+- `add` `deploy` `up` `down` `status` `init` `env` `bootstrap` `cf` `exe` `ui` `version`. `env` prints the effective app env (shell-sourcable; `--tunnel` adds TUNNEL_TOKEN) — feeds compose `.env` and CI secrets.
 - `bootstrap` = install/upgrade hive + celld at `~/.local/bin` on `hive.server` over ssh. The bare-box error path in `deploy`/`up` points at it.
-- `deploy` = typecheck (`tsc -b`) → `celld deploy` → restart node → 30s `/__celld/health` gate. **The restart is the reload** — no watch mode or HMR.
+- `deploy` = typecheck (`tsc -b`) → `celld deploy` → restart node → 30s `/__celld/health` gate. **The restart is the reload** — no watch mode or HMR. A failed gate tails the node's logs into the error (`docker logs --tail 20` or `.hive/node.log`, over ssh when remote).
 - Backends behind one interface; `down` is SIGTERM either way (celld drains gracefully). Idempotent; config drift → restart.
   - **process** (default): `celld` detached, log `.hive/node.log`. No supervisor — a reboot leaves the node down.
-  - **docker** (`--docker` / `"backend": "docker"`): container `hive-<app>`, image `hive/celld:<version>` built on demand, `127.0.0.1:<port>`, `--restart unless-stopped`, 0600 `--env-file`, label-hash drift detection. launchd/systemd were cut (git history has them); docker subsumes them.
+  - **docker** (`--docker` / `"backend": "docker"`): container `hive-<app>`, official image `ghcr.io/denoland/celld:<version>` pulled on demand (pinned to the local celld version), `127.0.0.1:<port>`, `--restart unless-stopped`, 0600 `--env-file`, label-hash drift detection. launchd/systemd were cut (git history has them); docker subsumes them.
 - Deployment targets = celld's: linux/amd64, linux/arm64, darwin/arm64. A bare box needs exactly `hive` + `celld` at `~/.local/bin`, plus docker if wanted.
 
 ## Provider model (settled)

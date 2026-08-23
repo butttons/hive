@@ -632,7 +632,8 @@ curl http://127.0.0.1:&lt;port&gt;/</code></pre>
                                     Typecheck (<code>tsc -b</code>) →
                                     <code>celld deploy</code> → restart the node
                                     → wait for <code>/__celld/health</code> (30s
-                                    gate). Prints the version ID.
+                                    gate). Prints the version ID. On failure,
+                                    prints the node's recent logs.
                                     <code>--no-restart</code> uploads only, for
                                     externally supervised nodes
                                 </td>
@@ -769,6 +770,16 @@ curl http://127.0.0.1:&lt;port&gt;/</code></pre>
                                     exe.dev
                                 </td>
                             </tr>
+                            <tr>
+                                <td><code>hive version</code></td>
+                                <td>—</td>
+                                <td>
+                                    Print the hive version. Release binaries are
+                                    stamped; remote commands warn when the box's
+                                    hive differs —
+                                    <code>hive bootstrap</code> syncs it
+                                </td>
+                            </tr>
                         </tbody>
                     </table>
                 </div>
@@ -839,9 +850,10 @@ curl http://127.0.0.1:&lt;port&gt;/</code></pre>
                     <li>
                         <strong>docker</strong> (<code>--docker</code> or
                         <code>"backend": "docker"</code>): node runs as
-                        container <code>hive-&lt;app&gt;</code> from image
-                        <code>hive/celld:&lt;version&gt;</code> (built on demand
-                        from the official celld release binary), published on
+                        container <code>hive-&lt;app&gt;</code> from the official
+                        <code>ghcr.io/denoland/celld:&lt;version&gt;</code>
+                        image (pulled on demand, pinned to the local celld
+                        version), published on
                         <code>127.0.0.1:&lt;port&gt;</code>,
                         <code>--restart unless-stopped</code>, config drift
                         detected by a label hash → recreate.

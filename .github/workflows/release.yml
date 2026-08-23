@@ -41,7 +41,7 @@ jobs:
         env:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
-        run: CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o "hive-$GOOS-$GOARCH" .
+        run: CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version=${GITHUB_REF_NAME}" -o "hive-$GOOS-$GOARCH" .
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4

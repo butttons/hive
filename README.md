@@ -83,7 +83,7 @@ Every command takes `--json` and prints machine-readable output. Agents are the 
 | command | flags | what it does |
 | --- | --- | --- |
 | `hive add <name>` | `--port`, `--force` | Scaffold a new app (wrangler.jsonc + index.ts + tsconfig + package.json), allocate a free port |
-| `hive deploy` | `--docker`, `--local`, `--no-restart`, `--filter` | Typecheck (`tsc -b`) → `celld deploy` → restart the node → wait for `/__celld/health` (30s gate). Prints the version ID. `--no-restart` uploads only, for externally supervised nodes (compose & co.) |
+| `hive deploy` | `--docker`, `--local`, `--no-restart`, `--filter` | Typecheck (`tsc -b`) → `celld deploy` → restart the node → wait for `/__celld/health` (30s gate). Prints the version ID. On failure, prints the node's recent logs. `--no-restart` uploads only, for externally supervised nodes (compose & co.) |
 | `hive deploy all` | `--docker`, `--local`, `--packages` | Deploy every app in the workspace sequentially, continuing past failures |
 | `hive up` | `--docker`, `--local` | Start the node. Idempotent; config drift → restart |
 | `hive down` | `--local` | Stop the node gracefully (SIGTERM; celld drains in-flight work) |
@@ -97,6 +97,7 @@ Every command takes `--json` and prints machine-readable output. Agents are the 
 | `hive exe new <name>` | — | Create an exe.dev VM (idempotent) and wait for its DNS to propagate |
 | `hive exe share` | `--private` | Point the exe.dev HTTPS proxy at the app's port; public by default |
 | `hive exe domain` | — | CNAME the app's domain to the VM (DNS-only, via Cloudflare creds) and register it with exe.dev |
+| `hive version` | — | Print the hive version. Release binaries are stamped; remote commands warn when the box's hive differs — `hive bootstrap` syncs it |
 
 ### `hive init` credential chain
 
@@ -114,7 +115,7 @@ Self-managed Cloudflare OAuth (authorization code + PKCE, no client secret). Def
 ## Run backends
 
 - **process** (default): `celld` as a detached process, logs to `.hive/node.log`, `down` = SIGTERM (celld drains gracefully). Zero moving parts; no supervisor — a reboot leaves the node down until the next `hive up`.
-- **docker** (`--docker` or `"backend": "docker"`): node runs as container `hive-<app>` from image `hive/celld:<version>` (built on demand from the official celld release binary), published on `127.0.0.1:<port>`, `--restart unless-stopped`, config drift detected by a label hash → recreate. `docker stop` is the same graceful drain.
+- **docker** (`--docker` or `"backend": "docker"`): node runs as container `hive-<app>` from the official `ghcr.io/denoland/celld:<version>` image (pulled on demand, pinned to the local celld version), published on `127.0.0.1:<port>`, `--restart unless-stopped`, config drift detected by a label hash → recreate. `docker stop` is the same graceful drain.
 
 Prefer to supervise the containers yourself? `examples/docker-compose.yml` runs a node from the official `ghcr.io/denoland/celld` image plus a cloudflared sidecar; `hive env --tunnel > .env` generates its credentials, and deploys become `hive deploy --no-restart && docker compose restart <app>`.
 
