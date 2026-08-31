@@ -255,7 +255,7 @@ func waitForRemoteHealth(ctx context.Context, server string, app *App) (bool, st
 	if !ok {
 		deadline = time.Now().Add(15 * time.Second)
 	}
-	url := fmt.Sprintf("http://127.0.0.1:%d/__celld/health", app.Hive.Port)
+	url := fmt.Sprintf("http://127.0.0.1:%d/.well-known/celld/health", app.Hive.Port)
 	script := "curl -fsS " + shellSingleQuote(url)
 	for time.Now().Before(deadline) {
 		cmd := exec.CommandContext(ctx, "ssh", server, script)

@@ -631,7 +631,7 @@ curl http://127.0.0.1:&lt;port&gt;/</code></pre>
                                 <td>
                                     Typecheck (<code>tsc -b</code>) →
                                     <code>celld deploy</code> → restart the node
-                                    → wait for <code>/__celld/health</code> (30s
+                                    → wait for <code>/.well-known/celld/health</code> (30s
                                     gate). Prints the version ID. On failure,
                                     prints the node's recent logs.
                                     <code>--no-restart</code> uploads only, for
@@ -855,7 +855,9 @@ curl http://127.0.0.1:&lt;port&gt;/</code></pre>
                         image (pulled on demand, pinned to the local celld
                         version), published on
                         <code>127.0.0.1:&lt;port&gt;</code>,
-                        <code>--restart unless-stopped</code>, config drift
+                        <code>--restart unless-stopped</code>,
+                        <code>--stop-timeout 60</code> (celld 0.4.0 needs
+                        up to 40s for graceful shutdown), config drift
                         detected by a label hash → recreate.
                         <code>docker stop</code> is the same graceful drain.
                     </li>

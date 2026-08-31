@@ -40,7 +40,7 @@ hive deploy               # tsc → celld deploy → restart node → health gat
 curl http://127.0.0.1:<port>/
 ```
 
-There is no watch mode or HMR — the restart is the reload. The loop is `edit → hive deploy → curl`.
+There is no watch mode or HMR. With celld ≥ 0.4.0 the restart is optional — celld adopts new deployments in place — but hive restarts the node by default for a clean slate. The loop is `edit → hive deploy → curl`.
 
 ## Config model
 
@@ -83,7 +83,7 @@ Every command takes `--json` and prints machine-readable output. Agents are the 
 | command | flags | what it does |
 | --- | --- | --- |
 | `hive add <name>` | `--port`, `--force` | Scaffold a new app (wrangler.jsonc + index.ts + tsconfig + package.json), allocate a free port |
-| `hive deploy` | `--docker`, `--local`, `--no-restart`, `--filter` | Typecheck (`tsc -b`) → `celld deploy` → restart the node → wait for `/__celld/health` (30s gate). Prints the version ID. On failure, prints the node's recent logs. `--no-restart` uploads only, for externally supervised nodes (compose & co.) |
+| `hive deploy` | `--docker`, `--local`, `--no-restart`, `--filter` | Typecheck (`tsc -b`) → `celld deploy` → restart the node → wait for `/.well-known/celld/health` (30s gate). With celld ≥ 0.4.0 the restart is optional — celld adopts deployments in place (zero-downtime) — but hive restarts by default for a clean slate. Prints the version ID. On failure, prints the node's recent logs. `--no-restart` uploads only, for externally supervised nodes (compose & co.) |
 | `hive deploy all` | `--docker`, `--local`, `--packages` | Deploy every app in the workspace sequentially, continuing past failures |
 | `hive up` | `--docker`, `--local` | Start the node. Idempotent; config drift → restart |
 | `hive down` | `--local` | Stop the node gracefully (SIGTERM; celld drains in-flight work) |
@@ -115,7 +115,7 @@ Self-managed Cloudflare OAuth (authorization code + PKCE, no client secret). Def
 ## Run backends
 
 - **process** (default): `celld` as a detached process, logs to `.hive/node.log`, `down` = SIGTERM (celld drains gracefully). Zero moving parts; no supervisor — a reboot leaves the node down until the next `hive up`.
-- **docker** (`--docker` or `"backend": "docker"`): node runs as container `hive-<app>` from the official `ghcr.io/denoland/celld:<version>` image (pulled on demand, pinned to the local celld version), published on `127.0.0.1:<port>`, `--restart unless-stopped`, config drift detected by a label hash → recreate. `docker stop` is the same graceful drain.
+- **docker** (`--docker` or `"backend": "docker"`): node runs as container `hive-<app>` from the official `ghcr.io/denoland/celld:<version>` image (pulled on demand, pinned to the local celld version), published on `127.0.0.1:<port>`, `--restart unless-stopped`, `--stop-timeout 60` (celld 0.4.0 needs up to 40s for graceful shutdown), config drift detected by a label hash → recreate. `docker stop` is the same graceful drain.
 
 Prefer to supervise the containers yourself? `examples/docker-compose.yml` runs a node from the official `ghcr.io/denoland/celld` image plus a cloudflared sidecar; `hive env --tunnel > .env` generates its credentials, and deploys become `hive deploy --no-restart && docker compose restart <app>`.
 

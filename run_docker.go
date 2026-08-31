@@ -167,6 +167,10 @@ func (dockerRunner) Up(ctx context.Context, app *App) error {
 		"run", "-d",
 		"--name", dockerContainerName(app),
 		"--restart", "unless-stopped",
+		// celld 0.4.0's graceful shutdown (drain tokens, batched handoffs,
+		// full snapshots) can take up to CELLD_SHUTDOWN_TOTAL_MS (default 40s).
+		// Give docker room so it doesn't SIGKILL mid-handoff.
+		"--stop-timeout", "60",
 		"--label", "hive.app=" + app.Name,
 		"--label", "hive.config=" + hash,
 		"-p", fmt.Sprintf("127.0.0.1:%d:8080", app.Hive.Port),
@@ -197,7 +201,9 @@ func (dockerRunner) Down(ctx context.Context, app *App) error {
 		fmt.Printf("no docker container for %s\n", app.Name)
 		return nil
 	}
-	// docker stop sends SIGTERM; celld drains gracefully.
+	// docker stop sends SIGTERM and waits up to the container's
+	// --stop-timeout (60s) before SIGKILL; celld drains gracefully in
+	// that window (CELLD_SHUTDOWN_TOTAL_MS defaults to 40s).
 	if _, err := docker("stop", dockerContainerName(app)); err != nil {
 		return fmt.Errorf("docker stop: %w", err)
 	}

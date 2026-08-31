@@ -119,7 +119,7 @@ func tailFile(path string, n int) string {
 }
 
 func healthURL(app *App) string {
-	return fmt.Sprintf("http://127.0.0.1:%d/__celld/health", app.Hive.Port)
+	return fmt.Sprintf("http://127.0.0.1:%d/.well-known/celld/health", app.Hive.Port)
 }
 
 func healthCheck(ctx context.Context, app *App) (bool, string) {
@@ -171,7 +171,9 @@ func waitForHealth(ctx context.Context, app *App) (bool, string) {
 func waitForPortClosed(ctx context.Context, port int) error {
 	deadline, ok := ctx.Deadline()
 	if !ok {
-		deadline = time.Now().Add(10 * time.Second)
+		// celld 0.4.0's graceful shutdown can take up to CELLD_SHUTDOWN_TOTAL_MS
+		// (default 40s) for batched handoffs + durability proof + snapshot.
+		deadline = time.Now().Add(45 * time.Second)
 	}
 	addr := fmt.Sprintf("127.0.0.1:%d", port)
 	dialer := &net.Dialer{Timeout: 200 * time.Millisecond}

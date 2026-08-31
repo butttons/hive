@@ -19,8 +19,10 @@
 # More apps: duplicate the app service, change name, port, CELLD_BUCKET suffix.
 
 x-celld: &celld
-  image: ghcr.io/denoland/celld:v0.3.0
+  image: ghcr.io/denoland/celld:v0.4.0
   restart: unless-stopped
+  # celld 0.4.0 graceful shutdown can take up to 40s; default 10s truncates it
+  stop_grace_period: 60s
   command: ["--trust-forwarded-headers"]
   environment: &celld-env
     CELLD_ADDR: 0.0.0.0:8080

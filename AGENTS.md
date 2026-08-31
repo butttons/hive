@@ -12,7 +12,7 @@
 - **Go, stdlib only.** Zero dependencies — no cobra/viper/any module without asking. The artifact is the product: single static binary, instant cold start, cross-compiled for darwin/arm64 + linux/arm64/amd64 (see `.github/workflows/release.yml`).
 - Rejected: Bun/Deno compile (~100MB V8 blob), Zig (pre-1.0 churn), Rust (iteration tax), TS-on-Node (needs Node on bare boxes).
 - **Agent-first CLI**: consistent subcommand grammar, `--json` on every command, `--force` (never `--skip-confirmations`), always explicit whether an operation is local or remote.
-- **No state files.** hive introspects reality every time: ports, `/__celld/health`, and the bucket's `deploy/current.json`.
+- **No state files.** hive introspects reality every time: ports, `/.well-known/celld/health`, and the bucket's `deploy/current.json`.
 - Everything except the app's two config files is generated — plists, tunnel config, env files.
 
 ## Config model (settled)
@@ -55,10 +55,10 @@ All implemented and verified live. User-facing reference: README.md / hive.buttt
 
 - `add` `deploy` `up` `down` `status` `init` `env` `bootstrap` `cf` `exe` `ui` `version`. `env` prints the effective app env (shell-sourcable; `--tunnel` adds TUNNEL_TOKEN) — feeds compose `.env` and CI secrets.
 - `bootstrap` = install/upgrade hive + celld at `~/.local/bin` on `hive.server` over ssh. The bare-box error path in `deploy`/`up` points at it.
-- `deploy` = typecheck (`tsc -b`) → `celld deploy` → restart node → 30s `/__celld/health` gate. **The restart is the reload** — no watch mode or HMR. A failed gate tails the node's logs into the error (`docker logs --tail 20` or `.hive/node.log`, over ssh when remote).
+- `deploy` = typecheck (`tsc -b`) → `celld deploy` → restart node → 30s `/.well-known/celld/health` gate. **With celld ≥ 0.4.0 the restart is optional** — celld adopts new deployments in place (zero-downtime) via `CELLD_DEPLOY_POLL_S` polling or `POST /reload`. hive restarts by default for a clean slate; `--no-restart` lets celld adopt on its own. A failed gate tails the node's logs into the error (`docker logs --tail 20` or `.hive/node.log`, over ssh when remote).
 - Backends behind one interface; `down` is SIGTERM either way (celld drains gracefully). Idempotent; config drift → restart.
   - **process** (default): `celld` detached, log `.hive/node.log`. No supervisor — a reboot leaves the node down.
-  - **docker** (`--docker` / `"backend": "docker"`): container `hive-<app>`, official image `ghcr.io/denoland/celld:<version>` pulled on demand (pinned to the local celld version), `127.0.0.1:<port>`, `--restart unless-stopped`, 0600 `--env-file`, label-hash drift detection. launchd/systemd were cut (git history has them); docker subsumes them.
+  - **docker** (`--docker` / `"backend": "docker"`): container `hive-<app>`, official image `ghcr.io/denoland/celld:<version>` pulled on demand (pinned to the local celld version), `127.0.0.1:<port>`, `--restart unless-stopped`, 0600 `--env-file`, `--stop-timeout 60` (celld 0.4.0's graceful shutdown needs up to `CELLD_SHUTDOWN_TOTAL_MS`=40s), label-hash drift detection. launchd/systemd were cut (git history has them); docker subsumes them.
 - Deployment targets = celld's: linux/amd64, linux/arm64, darwin/arm64. A bare box needs exactly `hive` + `celld` at `~/.local/bin`, plus docker if wanted.
 
 ## Provider model (settled)
@@ -78,13 +78,16 @@ All implemented and verified live. User-facing reference: README.md / hive.buttt
 
 ## celld operational facts (verified)
 
-- **One app = one fleet = one bucket prefix** (`s3://bucket/<app>`). Nodes load `deploy/current.json` at startup — restart after every deploy.
+- **One app = one fleet = one bucket prefix** (`s3://bucket/<app>`). Nodes load `deploy/current.json` at startup. With celld ≥ 0.4.0 the node adopts a new deployment in place without a restart (polled via `CELLD_DEPLOY_POLL_S`, default 30s, or `POST /reload`); a restart is still a valid way to pick up config/env changes.
 - **Only ONE node per prefix may run.** Two nodes → `DurableObjectRoutingError: owner unreachable`. `hive down --local` before testing remote.
 - The bucket is the administrative authority (deployments, replicas, ownership, leases, peer secret). Credentials = full fleet control.
 - Store requirements: conditional writes + read-after-write consistency. R2/S3/Tigris qualify; B2/MinIO/Spaces do not.
-- Nodes need `esbuild` on PATH for deploys. Verified at celld v0.3.0.
-- Operator API (`/state`, `POST /shutdown`) is alpha and version-locked — build against it loosely.
+- Nodes need `esbuild` on PATH for deploys. Verified at celld v0.4.0.
+- **Upgrade note (0.3.0 → 0.4.0):** a v0.3.0 fleet must stop completely before v0.4.0 is deployed. The two versions cannot share a fleet — the peer tunnel protocol and large Workers KV value references are incompatible. Stop all nodes, deploy celld 0.4.0, then restart.
+- Operator API (`/state`, `POST /reload`, `POST /shutdown`) is alpha and version-locked — build against it loosely. `POST /reload` adopts a new deployment pointer without restarting the process; `POST /shutdown` triggers the graceful handoff. `POST /shutdown?handoff=preserve` does a clean same-node reload.
 - `celld deploy` prints `Current Version ID: <16-hex>`; `hive deploy --json` surfaces it as `"version"`.
+- Health endpoint moved in 0.4.0: `/__celld/health` → `/.well-known/celld/health`. During graceful shutdown the endpoint returns 503, so the health gate correctly retries until the restarted node is ready (or the orchestrator's `CELLD_SHUTDOWN_TOTAL_MS` expires).
+- celld ≥ 0.4.0 supports Workers KV, Queues, Workflows, and R2 bindings deployed from the Wrangler configuration. These keys are now part of the celld-legal `wrangler.jsonc` subset. New env vars worth knowing: `CELLD_DEPLOY_POLL_S`, `CELLD_DEPLOY_MAX_AGE_S`, `CELLD_DURABILITY` (default `fleet`), `CELLD_MAX_CELL_REQUESTS`, `CELLD_MAX_REQUEST_BODY_BYTES` (default 1 GiB).
 - TS wrinkle: use non-generic `DurableObjectNamespace` unless extending `DurableObject` from `cloudflare:workers`.
 
 ## Box gotchas (verified)
