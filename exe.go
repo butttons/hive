@@ -245,6 +245,7 @@ func cmdExeDomain(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("exe domain", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	jsonFlag := fs.Bool("json", false, "")
+	wildcard := fs.Bool("wildcard", false, "also register *.DOMAIN and issue a wildcard cert")
 	if err := fs.Parse(args); err != nil {
 		return fmt.Errorf("parse flags: %w", err)
 	}
@@ -262,27 +263,49 @@ func cmdExeDomain(ctx context.Context, args []string) error {
 	}
 	target := vm + ".exe.xyz"
 
+	// The bare domain must resolve so exe.dev can validate it; with --wildcard
+	// its `*.domain` sibling does the real work (every subdomain routes here).
+	hosts := []string{app.Hive.Domain}
+	if *wildcard {
+		hosts = append(hosts, "*."+app.Hive.Domain)
+	}
+
 	if _, err := cfAccessToken(ctx); err != nil {
-		return fmt.Errorf("no cloudflare credentials; create this record at your DNS provider, then re-run:\n  %s CNAME %s (DNS only, not proxied)", app.Hive.Domain, target)
+		records := make([]string, 0, len(hosts))
+		for _, h := range hosts {
+			records = append(records, h)
+		}
+		return fmt.Errorf("no cloudflare credentials; create these records at your DNS provider, then re-run:\n  %s CNAME %s (DNS only, not proxied)", strings.Join(records, ", "), target)
 	}
 	zone, err := findZone(ctx, app.Hive.Domain)
 	if err != nil {
 		return err
 	}
-	changed, err := upsertCNAME(ctx, zone.ID, app.Hive.Domain, target, false)
-	if err != nil {
-		return err
+	changed := false
+	for _, host := range hosts {
+		dnsChanged, err := upsertCNAME(ctx, zone.ID, host, target, false)
+		if err != nil {
+			return err
+		}
+		changed = changed || dnsChanged
 	}
+	// exe.dev resolves the bare domain for validation, so wait on it (a
+	// wildcard CNAME alone would not satisfy their check).
 	if err := waitForDNS(ctx, app.Hive.Domain, 2*time.Minute); err != nil {
 		return err
 	}
 	// exe.dev verifies DNS from its own resolver, which lags ours, and
 	// `domain add` can report failure only on stdout. Retry until the
 	// registration is visible in `domain ls`.
+	registerArgs := []string{"domain", "add"}
+	if *wildcard {
+		registerArgs = append(registerArgs, "--wildcard")
+	}
+	registerArgs = append(registerArgs, vm, app.Hive.Domain)
 	var lastErr error
 	registered := false
 	for range 10 {
-		if _, err := exeCLI(ctx, "domain", "add", vm, app.Hive.Domain); err != nil {
+		if _, err := exeCLI(ctx, registerArgs...); err != nil {
 			lastErr = err
 		}
 		if ok, err := exeDomainRegistered(ctx, vm, app.Hive.Domain); err == nil && ok {
@@ -306,9 +329,10 @@ func cmdExeDomain(ctx context.Context, args []string) error {
 		res := struct {
 			VM         string `json:"vm"`
 			Domain     string `json:"domain"`
+			Wildcard   bool   `json:"wildcard"`
 			DNSChanged bool   `json:"dns_changed"`
 			URL        string `json:"url"`
-		}{vm, app.Hive.Domain, changed, "https://" + app.Hive.Domain}
+		}{vm, app.Hive.Domain, *wildcard, changed, "https://" + app.Hive.Domain}
 		b, err := json.MarshalIndent(res, "", "  ")
 		if err != nil {
 			return fmt.Errorf("marshal result: %w", err)
@@ -317,10 +341,14 @@ func cmdExeDomain(ctx context.Context, args []string) error {
 		return nil
 	}
 	if changed {
-		fmt.Printf("dns: %s -> %s (dns only)\n", app.Hive.Domain, target)
+		fmt.Printf("dns: %s -> %s (dns only)\n", strings.Join(hosts, ", "), target)
 	} else {
-		fmt.Printf("dns: %s already points at %s\n", app.Hive.Domain, target)
+		fmt.Printf("dns: %s already points at %s\n", strings.Join(hosts, ", "), target)
 	}
-	fmt.Printf("live: https://%s\n", app.Hive.Domain)
+	live := "https://" + app.Hive.Domain
+	if *wildcard {
+		live = "https://(*.)" + app.Hive.Domain
+	}
+	fmt.Printf("live: %s\n", live)
 	return nil
 }
