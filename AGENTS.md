@@ -82,7 +82,8 @@ All implemented and verified live. User-facing reference: README.md / hive.buttt
 - **Only ONE node per prefix may run.** Two nodes → `DurableObjectRoutingError: owner unreachable`. `hive down --local` before testing remote.
 - The bucket is the administrative authority (deployments, replicas, ownership, leases, peer secret). Credentials = full fleet control.
 - Store requirements: conditional writes + read-after-write consistency. R2/S3/Tigris qualify; B2/MinIO/Spaces do not.
-- Nodes need `esbuild` on PATH for deploys. Verified at celld v0.4.0.
+- Nodes need `esbuild` on PATH for deploys. Verified at celld v0.6.2.
+- **0.6.x notes (verified live):** a node with no deployment yet accepts TCP but never answers HTTP — including `/.well-known/celld/health`. The health gate only runs post-deploy in hive's flow, so this bites only fresh-fleet `up` (gate times out; deploy first). `celld dev` and `celld d1` accept a config *file* as PROJECT (`celld d1 … ./wrangler.celld.jsonc`); only bare-directory args demand the default `wrangler.jsonc` name. Export the worker entry as a plain `{ fetch }` object, never a class instance — unbound dispatch passes `this` as undefined and breaks `#private` fields (seen with `OAuthProvider`).
 - **Upgrade note (0.3.0 → 0.4.0):** a v0.3.0 fleet must stop completely before v0.4.0 is deployed. The two versions cannot share a fleet — the peer tunnel protocol and large Workers KV value references are incompatible. Stop all nodes, deploy celld 0.4.0, then restart.
 - Operator API (`/state`, `POST /reload`, `POST /shutdown`) is alpha and version-locked — build against it loosely. `POST /reload` adopts a new deployment pointer without restarting the process; `POST /shutdown` triggers the graceful handoff. `POST /shutdown?handoff=preserve` does a clean same-node reload.
 - `celld deploy` prints `Current Version ID: <16-hex>`; `hive deploy --json` surfaces it as `"version"`.
