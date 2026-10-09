@@ -96,7 +96,7 @@ Every command takes `--json` and prints machine-readable output. Agents are the 
 | `hive cf tunnel` | `--name`, `--ssh` | Create/sync a remotely-managed Cloudflare Tunnel: ingress rules + DNS, prints the box install command |
 | `hive exe new <name>` | — | Create an exe.dev VM (idempotent) and wait for its DNS to propagate |
 | `hive exe share` | `--private` | Point the exe.dev HTTPS proxy at the app's port; public by default |
-| `hive exe domain` | — | CNAME the app's domain to the VM (DNS-only, via Cloudflare creds) and register it with exe.dev |
+| `hive exe domain` | `--wildcard` | CNAME the app's domain to the VM (DNS-only, via Cloudflare creds) and register it with exe.dev; `--wildcard` also CNAMEs `*.domain` and asks exe for a `*.domain` cert — every subdomain now routes to the VM |
 | `hive version` | — | Print the hive version. Release binaries are stamped; remote commands warn when the box's hive differs — `hive bootstrap` syncs it |
 
 ### `hive init` credential chain
@@ -144,6 +144,8 @@ hive exe domain           # mybot.example.com live: DNS-only CNAME + exe.dev reg
 ```
 
 `exe domain` uses your Cloudflare credentials to create the CNAME and hard-requires `proxied: false` — exe.dev terminates TLS itself and orange-cloud records break it. Without cf credentials it prints the exact record to create and exits; re-run after creating it. Registration is verified via exe.dev's `domain ls` and retried, since their resolver lags yours.
+
+`exe domain --wildcard` additionally CNAMEs `*.domain` and registers with `domain add --wildcard`, so exe.dev issues a `*.domain` cert. Any `sub.domain` then terminates TLS at exe's edge and hits the app's port — the pattern for subdomain-routing proxies (the app dispatches on the Host header).
 
 CI: a stock GitHub-hosted runner runs `hive deploy`; it reaches the box via SSH through the Cloudflare Tunnel (`hive cf tunnel --ssh` adds the `ssh.<domain>` ingress rule; `sshd` bound to loopback, cloudflared as SSH ProxyCommand). Secrets: bucket creds, SSH key, tunnel token.
 
