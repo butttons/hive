@@ -75,7 +75,9 @@ func ensureDockerImage(ctx context.Context) (string, error) {
 }
 
 // dockerEnvSpec is the desired container configuration; its hash is stored
-// as a label so drift triggers a recreate.
+// as a label so drift triggers a recreate. All CELLD_*/cloud credential
+// env flows into the container so node tuning (CELLD_DURABILITY,
+// CELLD_LTX_RETENTION_SECS, ...) matches process-backend behavior.
 func dockerEnvSpec(app *App, image string) ([]string, string, error) {
 	bucket, err := celldBucketEnv()
 	if err != nil {
@@ -87,15 +89,16 @@ func dockerEnvSpec(app *App, image string) ([]string, string, error) {
 		"CELLD_INTERNAL_ADDR": "127.0.0.1:8081",
 		"CELLD_WATCH":         "/data",
 	}
-	for _, k := range []string{"S3_ENDPOINT", "AWS_REGION", "AWS_DEFAULT_REGION",
-		"AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN", "RUST_LOG"} {
-		if v := os.Getenv(k); v != "" {
+	for _, kv := range os.Environ() {
+		if k, v, ok := strings.Cut(kv, "="); ok && isCelldPassthroughKey(k) && k != "CELLD_BUCKET" && k != "CELLD_WATCH" && k != "CELLD_ADDR" && k != "CELLD_INTERNAL_ADDR" {
 			env[k] = v
 		}
 	}
-	for _, k := range []string{"S3_ENDPOINT", "AWS_REGION", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"} {
-		if env[k] == "" {
-			return nil, "", fmt.Errorf("%s is not set (export it, or run hive init)", k)
+	if bucketScheme() == "s3" {
+		for _, k := range []string{"S3_ENDPOINT", "AWS_REGION", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"} {
+			if env[k] == "" {
+				return nil, "", fmt.Errorf("%s is not set (export it, or run hive init)", k)
+			}
 		}
 	}
 	keys := make([]string, 0, len(env))

@@ -680,6 +680,11 @@ func remoteStatusJSON(server string, app *App) (statusResult, error) {
 }
 
 func fetchLiveVersion(app *App) string {
+	// Version introspection reads the S3 API directly; gs:// and az://
+	// fleets use their own credential chains, so report unknown there.
+	if bucketScheme() != "s3" {
+		return "unknown"
+	}
 	bucket := strings.TrimPrefix(os.Getenv("CELLD_BUCKET"), "s3://")
 	if bucket == "" {
 		return "unknown"
@@ -794,12 +799,18 @@ func runCelldDeploy(ctx context.Context, app *App, jsonMode bool) (string, error
 	args := []string{
 		"deploy",
 		"--bucket", bucket + "/" + app.Name,
+		// --json prints the deployment as one JSON object on the last
+		// line (celld 0.6.x); parse that for the version, falling back
+		// to the human-readable lines for older binaries.
+		"--json",
 	}
-	if ep := os.Getenv("S3_ENDPOINT"); ep != "" {
-		args = append(args, "--endpoint", ep)
-	}
-	if r := os.Getenv("AWS_REGION"); r != "" {
-		args = append(args, "--region", r)
+	if bucketScheme() == "s3" {
+		if ep := os.Getenv("S3_ENDPOINT"); ep != "" {
+			args = append(args, "--endpoint", ep)
+		}
+		if r := os.Getenv("AWS_REGION"); r != "" {
+			args = append(args, "--region", r)
+		}
 	}
 
 	var outBuf, errBuf bytes.Buffer
@@ -826,6 +837,19 @@ func runCelldDeploy(ctx context.Context, app *App, jsonMode bool) (string, error
 var versionRe = regexp.MustCompile(`(?i)(?:current version id|version id|version)[:\s=]+([a-f0-9]{7,64}|[^\s]+)`)
 
 func extractVersion(output string) string {
+	// Prefer the --json line celld 0.6.x prints last: {"version": "..."}.
+	for _, line := range strings.Split(output, "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "{") {
+			continue
+		}
+		var v struct {
+			Version string `json:"version"`
+		}
+		if err := json.Unmarshal([]byte(line), &v); err == nil && v.Version != "" {
+			return v.Version
+		}
+	}
 	for _, line := range strings.Split(output, "\n") {
 		if m := versionRe.FindStringSubmatch(line); m != nil {
 			return m[1]

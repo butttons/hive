@@ -38,8 +38,8 @@ func appEnvFilePath(app *App) string {
 
 // readEnvFile parses a shell-sourcable env file into a key/value map.
 // Empty lines, comments, and malformed lines are ignored. Values are
-// unquoted using shell single-quote rules and CELLD_BUCKET is normalized
-// to drop the s3:// prefix.
+// unquoted using shell single-quote rules and a legacy bare s3:// prefix on
+// CELLD_BUCKET is normalized; gs:// and az:// schemes are preserved.
 func readEnvFile(path string) (map[string]string, error) {
 	b, err := os.ReadFile(path)
 	if err != nil {
@@ -87,15 +87,20 @@ func loadAppEnv(app *App) error {
 
 // buildAppEnvFileContent serializes the current environment's celld-relevant
 // keys as a shell-sourcable file. Values are single-quoted for safety.
-// CELLD_BUCKET is normalized to drop the s3:// prefix so the wrapper's sourced
-// env matches what celld's --bucket argument expects.
+// CELLD_BUCKET keeps its scheme (s3://, gs://, az://) so non-S3 fleets
+// round-trip; the s3:// prefix is only stripped for backwards compat with
+// env files written by older hive versions when read back.
 func buildAppEnvFileContent() string {
 	var b strings.Builder
+	seen := map[string]bool{}
 	for _, k := range envFileKeys {
 		if v := os.Getenv(k); v != "" {
-			if k == "CELLD_BUCKET" {
-				v = strings.TrimPrefix(v, "s3://")
-			}
+			fmt.Fprintf(&b, "%s=%s\n", k, shellSingleQuote(v))
+			seen[k] = true
+		}
+	}
+	for _, kv := range os.Environ() {
+		if k, v, ok := strings.Cut(kv, "="); ok && !seen[k] && isCelldPassthroughKey(k) && v != "" {
 			fmt.Fprintf(&b, "%s=%s\n", k, shellSingleQuote(v))
 		}
 	}
@@ -157,6 +162,13 @@ func cmdEnv(ctx context.Context, args []string) error {
 		}
 		if v := os.Getenv(k); v != "" {
 			out[k] = v
+		}
+	}
+	for _, kv := range os.Environ() {
+		if k, v, ok := strings.Cut(kv, "="); ok && isCelldPassthroughKey(k) && v != "" {
+			if _, dup := out[k]; !dup {
+			out[k] = v
+			}
 		}
 	}
 

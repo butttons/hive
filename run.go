@@ -67,6 +67,38 @@ func celldBucketEnv() (string, error) {
 	return strings.TrimPrefix(b, "s3://"), nil
 }
 
+// bucketScheme reports the fleet bucket scheme: "gs", "az", or "s3"
+// (bare names and s3:// both use the S3 credential chain).
+func bucketScheme() string {
+	b := strings.TrimSpace(os.Getenv("CELLD_BUCKET"))
+	if strings.HasPrefix(b, "gs://") {
+		return "gs"
+	}
+	if strings.HasPrefix(b, "az://") {
+		return "az"
+	}
+	return "s3"
+}
+
+// isCelldPassthroughKey reports whether an env var belongs to the node and
+// should flow into `celld` invocations, the docker container, and the
+// persisted env file. celld 0.6.x reads a wide CELLD_* tuning surface
+// (CELLD_DURABILITY, CELLD_LTX_RETENTION_SECS, CELLD_MAX_ASSET_FILE_BYTES,
+// CELLD_MAX_DYNAMIC_WORKER_CODE_BYTES, ...) plus cloud credential chains,
+// so anything under these prefixes passes through instead of an allowlist.
+func isCelldPassthroughKey(k string) bool {
+	if strings.HasPrefix(k, "CELLD_") {
+		return true
+	}
+	if strings.HasPrefix(k, "S3_") || strings.HasPrefix(k, "AWS_") {
+		return true
+	}
+	if strings.HasPrefix(k, "AZURE_") || strings.HasPrefix(k, "GOOGLE_") || strings.HasPrefix(k, "OTEL_") {
+		return true
+	}
+	return k == "GOOGLE_APPLICATION_CREDENTIALS" || k == "RUST_LOG"
+}
+
 func celldArgs(app *App) ([]string, error) {
 	bucket, err := celldBucketEnv()
 	if err != nil {
@@ -77,27 +109,30 @@ func celldArgs(app *App) ([]string, error) {
 		"--listen", fmt.Sprintf("127.0.0.1:%d", app.Hive.Port),
 		"--trust-forwarded-headers",
 	}
-	if ep := os.Getenv("S3_ENDPOINT"); ep != "" {
-		args = append(args, "--endpoint", ep)
-	}
-	if r := os.Getenv("AWS_REGION"); r != "" {
-		args = append(args, "--region", r)
+	// gs:// and az:// buckets take credentials from their own chains;
+	// celld rejects --endpoint and ignores --region for them.
+	if bucketScheme() == "s3" {
+		if ep := os.Getenv("S3_ENDPOINT"); ep != "" {
+			args = append(args, "--endpoint", ep)
+		}
+		if r := os.Getenv("AWS_REGION"); r != "" {
+			args = append(args, "--region", r)
+		}
 	}
 	return args, nil
 }
 
 func celldEnviron() []string {
-	keep := []string{
-		"PATH", "HOME", "USER", "SHELL", "TMPDIR",
-		"CELLD_BUCKET", "CELLD_WATCH", "CELLD_ESBUILD",
-		"S3_ENDPOINT", "AWS_REGION", "AWS_DEFAULT_REGION",
-		"AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN",
-		"RUST_LOG",
-	}
-	out := make([]string, 0, len(keep))
+	keep := []string{"PATH", "HOME", "USER", "SHELL", "TMPDIR"}
+	out := make([]string, 0, len(keep)+8)
 	for _, k := range keep {
 		if v := os.Getenv(k); v != "" {
 			out = append(out, k+"="+v)
+		}
+	}
+	for _, kv := range os.Environ() {
+		if k, _, ok := strings.Cut(kv, "="); ok && isCelldPassthroughKey(k) {
+			out = append(out, kv)
 		}
 	}
 	return out
